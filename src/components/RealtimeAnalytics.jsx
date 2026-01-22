@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useEffect, useRef } from 'react'
 import { Activity, Zap, TrendingUp, Clock, Cpu, Eye, BarChart3, DollarSign, AlertCircle } from 'lucide-react'
 
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = '=https://ocr-8tbh.onrender.com'
 
 export default function RealtimeAnalytics() {
     const [stats, setStats] = useState(null)

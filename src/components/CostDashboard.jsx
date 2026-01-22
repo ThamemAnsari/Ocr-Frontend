@@ -2,7 +2,7 @@ import { motion } from 'framer-motion'
 import { useState, useEffect } from 'react'
 import { DollarSign, TrendingDown, Percent, Zap, Activity } from 'lucide-react'
 
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = 'https://ocr-8tbh.onrender.com'
 
 export default function CostDashboard() {
     const [stats, setStats] = useState(null)

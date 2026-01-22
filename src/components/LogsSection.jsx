@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useEffect } from 'react'
 import { CheckCircle, XCircle, Clock, Calendar, User, Hash, Zap, RefreshCw, Trash2, Eye, ExternalLink } from 'lucide-react'
 
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = 'https://ocr-8tbh.onrender.com'
 
 export default function LogsSection() {
     const [logs, setLogs] = useState([])

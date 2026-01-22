@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { Upload, FileText, X, Sparkles } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = 'https://ocr-8tbh.onrender.com'
 const MAX_FILES = 10
 
 export default function UploadSection({ onProcessingStart }) {
