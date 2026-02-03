@@ -49,15 +49,16 @@ export default function AutoExtractor() {
   const [records, setRecords] = useState([])
   const [isLoadingRecords, setIsLoadingRecords] = useState(false)
   const [selectedRecords, setSelectedRecords] = useState(new Set())
-  
+  const [includeAlreadyExtracted, setIncludeAlreadyExtracted] = useState(false)
+
   const [currentPage, setCurrentPage] = useState(1)
   const [recordsPerPage] = useState(50)
   const [searchQuery, setSearchQuery] = useState('')
-  
+
   const [activeJob, setActiveJob] = useState(null)
   const [jobStatus, setJobStatus] = useState(null)
   const [isPolling, setIsPolling] = useState(false)
-  
+
   const [processingSpeed, setProcessingSpeed] = useState(0)
   const [lastProcessedCount, setLastProcessedCount] = useState(0)
   const [lastUpdateTime, setLastUpdateTime] = useState(Date.now())
@@ -100,7 +101,7 @@ export default function AutoExtractor() {
       })
 
       const data = await response.json()
-      
+
       if (data.success) {
         setAvailableFields({
           file_fields: data.file_fields || [],
@@ -123,10 +124,10 @@ export default function AutoExtractor() {
 
   const buildFilterCriteria = () => {
     if (filters.length === 0) return ''
-    
+
     const criteria = filters.map(f => {
       const { field, operator, value } = f
-      
+
       if (operator === 'contains') {
         return `${field}.contains("${value}")`
       } else if (operator === '==') {
@@ -144,54 +145,55 @@ export default function AutoExtractor() {
       }
       return ''
     }).filter(Boolean).join(' && ')
-    
+
     return criteria
   }
 
-  const loadRecords = async () => {
-    setIsLoadingRecords(true)
-    
-    try {
-      const formData = new FormData()
-      formData.append('app_link_name', config.app_link_name)
-      formData.append('report_link_name', config.report_link_name)
-      
-      if (config.bank_field_name) formData.append('bank_field_name', config.bank_field_name)
-      if (config.bill_field_name) formData.append('bill_field_name', config.bill_field_name)
-      
-      const builtCriteria = buildFilterCriteria()
-      if (builtCriteria) formData.append('filter_criteria', builtCriteria)
-      
-      // ✅ DON'T pre-store images - just load metadata
-      formData.append('store_images', 'false')
+  
+const loadRecords = async (fetchAll = true) => {
+  setIsLoadingRecords(true)
 
-      const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/preview`, {
-        method: 'POST',
-        body: formData
-      })
+  try {
+    const formData = new FormData()
+    formData.append('app_link_name', config.app_link_name)
+    formData.append('report_link_name', config.report_link_name)
 
-      const data = await response.json()
-      if (data.success) {
-        const fullRecords = data.sample_records || []
-        setRecords(fullRecords)
-        setSelectedRecords(new Set())
-        setCurrentPage(1)
-        
-        toast.success(`✅ Loaded ${fullRecords.length} records (ready to process)`, {
-          icon: '⚡',
-          style: { borderRadius: '12px', background: '#8B5CF6', color: 'white' },
-          duration: 3000
-        })
-      } else {
-        toast.error(`Error: ${data.error}`)
-      }
-    } catch (error) {
-      toast.error(`Failed to load records: ${error.message}`)
-    } finally {
-      setIsLoadingRecords(false)
+    if (config.bank_field_name) formData.append('bank_field_name', config.bank_field_name)
+    if (config.bill_field_name) formData.append('bill_field_name', config.bill_field_name)
+
+    const builtCriteria = buildFilterCriteria()
+    if (builtCriteria) formData.append('filter_criteria', builtCriteria)
+
+    formData.append('store_images', 'false')
+    formData.append('fetch_all', fetchAll.toString())
+    formData.append('include_already_extracted', includeAlreadyExtracted.toString())  // ✅ NEW
+
+    const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/preview`, {
+      method: 'POST',
+      body: formData
+    })
+
+    const data = await response.json()
+    if (data.success) {
+      const fullRecords = data.sample_records || []
+      setRecords(fullRecords)
+      setSelectedRecords(new Set())
+      setCurrentPage(1)
+
+      toast.success(
+        `✅ Loaded ${fullRecords.length} records out of ${data.total_in_zoho} total in Zoho\n${data.already_extracted_count > 0 ? `(${data.already_extracted_count} already extracted)` : ''}`,
+        {
+          icon: '🔍',
+          duration: 5000
+        }
+      )
     }
+  } catch (error) {
+    toast.error(`Failed to load records: ${error.message}`)
+  } finally {
+    setIsLoadingRecords(false)
   }
-
+}
   const startExtraction = async () => {
     if (selectedRecords.size === 0) {
       toast.error('Please select at least one record to process')
@@ -202,13 +204,13 @@ export default function AutoExtractor() {
       const formData = new FormData()
       formData.append('app_link_name', config.app_link_name)
       formData.append('report_link_name', config.report_link_name)
-      
+
       if (config.bank_field_name) formData.append('bank_field_name', config.bank_field_name)
       if (config.bill_field_name) formData.append('bill_field_name', config.bill_field_name)
-      
+
       const builtCriteria = buildFilterCriteria()
       if (builtCriteria) formData.append('filter_criteria', builtCriteria)
-      
+
       formData.append('selected_record_ids', JSON.stringify([...selectedRecords]))
 
       const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/start`, {
@@ -217,14 +219,14 @@ export default function AutoExtractor() {
       })
 
       const data = await response.json()
-      
+
       // ✅ Handle duplicate job error
       if (response.status === 409) {
         toast.error(`⚠️ ${data.message}`, {
           duration: 6000,
           style: { borderRadius: '12px', background: '#EF4444', color: 'white' }
         })
-        
+
         // Auto-load the active job
         if (data.active_job_id) {
           setActiveJob(data.active_job_id)
@@ -236,14 +238,14 @@ export default function AutoExtractor() {
         }
         return
       }
-      
+
       if (data.success) {
         setActiveJob(data.job_id)
         setIsPolling(true)
         setLastProcessedCount(0)
         setLastUpdateTime(Date.now())
         setProcessingSpeed(0)
-        toast.success(`🚀 Processing started!`, { 
+        toast.success(`🚀 Processing started!`, {
           duration: 5000,
           style: { borderRadius: '12px', background: '#8B5CF6', color: 'white' }
         })
@@ -259,13 +261,13 @@ export default function AutoExtractor() {
     try {
       const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/status/${jobId}`)
       const data = await response.json()
-      
+
       if (data.success) {
         setJobStatus(data)
-        
+
         const now = Date.now()
         const processed = data.progress?.processed_records || 0
-        
+
         if (processed > lastProcessedCount) {
           const timeDiff = (now - lastUpdateTime) / 1000 / 60
           const recordsDiff = processed - lastProcessedCount
@@ -274,7 +276,7 @@ export default function AutoExtractor() {
           setLastProcessedCount(processed)
           setLastUpdateTime(now)
         }
-        
+
         if (data.status === 'completed' || data.status === 'failed') {
           setIsPolling(false)
           if (data.status === 'completed') {
@@ -324,7 +326,7 @@ export default function AutoExtractor() {
   }
 
   const updateFilter = (id, key, value) => {
-    setFilters(filters.map(f => 
+    setFilters(filters.map(f =>
       f.id === id ? { ...f, [key]: value } : f
     ))
   }
@@ -606,28 +608,28 @@ export default function AutoExtractor() {
           background: 'radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%)',
           animation: 'pulse 6s ease-in-out infinite'
         }} />
-        
+
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
             <Sparkles size={32} color="white" />
-            <h1 style={{ 
-              margin: 0, 
-              fontSize: '36px', 
-              fontWeight: 800, 
+            <h1 style={{
+              margin: 0,
+              fontSize: '36px',
+              fontWeight: 800,
               color: 'white',
               letterSpacing: '-1px'
             }}>
               Intelligent Auto Extractor
             </h1>
           </div>
-          <p style={{ 
-            fontSize: '18px', 
-            color: 'rgba(255,255,255,0.9)', 
+          <p style={{
+            fontSize: '18px',
+            color: 'rgba(255,255,255,0.9)',
             margin: 0,
             maxWidth: '700px',
             lineHeight: 1.6
           }}>
-            Process thousands of documents with AI-powered precision. 
+            Process thousands of documents with AI-powered precision.
             Real-time extraction with zero wait time.
           </p>
         </div>
@@ -642,9 +644,9 @@ export default function AutoExtractor() {
         >
           {/* Step 1: Source Config */}
           <div style={{ marginBottom: '40px' }}>
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
               gap: '16px',
               marginBottom: '24px'
             }}>
@@ -661,10 +663,10 @@ export default function AutoExtractor() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 240px', gap: '20px' }}>
               <div>
-                <label style={{ 
-                  display: 'block', 
-                  marginBottom: '10px', 
-                  fontSize: '14px', 
+                <label style={{
+                  display: 'block',
+                  marginBottom: '10px',
+                  fontSize: '14px',
                   fontWeight: 600,
                   color: '#475569'
                 }}>App Link Name</label>
@@ -672,16 +674,16 @@ export default function AutoExtractor() {
                   type="text"
                   className="input-modern"
                   value={config.app_link_name}
-                  onChange={(e) => setConfig({...config, app_link_name: e.target.value})}
+                  onChange={(e) => setConfig({ ...config, app_link_name: e.target.value })}
                   placeholder="teameverest/app-name"
                 />
               </div>
 
               <div>
-                <label style={{ 
-                  display: 'block', 
-                  marginBottom: '10px', 
-                  fontSize: '14px', 
+                <label style={{
+                  display: 'block',
+                  marginBottom: '10px',
+                  fontSize: '14px',
                   fontWeight: 600,
                   color: '#475569'
                 }}>Report Link Name</label>
@@ -689,7 +691,7 @@ export default function AutoExtractor() {
                   type="text"
                   className="input-modern"
                   value={config.report_link_name}
-                  onChange={(e) => setConfig({...config, report_link_name: e.target.value})}
+                  onChange={(e) => setConfig({ ...config, report_link_name: e.target.value })}
                   placeholder="Report_Name"
                 />
               </div>
@@ -735,7 +737,7 @@ export default function AutoExtractor() {
                 }}
               >
                 <CheckCircle2 size={20} />
-                Loaded {availableFields.all_fields.length} fields 
+                Loaded {availableFields.all_fields.length} fields
                 ({availableFields.file_fields.length} images, {availableFields.text_fields.length} text)
               </motion.div>
             )}
@@ -744,9 +746,9 @@ export default function AutoExtractor() {
           {/* Step 2: Field Selection */}
           {availableFields.all_fields.length > 0 && (
             <div style={{ marginBottom: '40px' }}>
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
                 gap: '16px',
                 marginBottom: '24px'
               }}>
@@ -763,17 +765,17 @@ export default function AutoExtractor() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                 <div>
-                  <label style={{ 
-                    display: 'block', 
-                    marginBottom: '10px', 
-                    fontSize: '14px', 
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '10px',
+                    fontSize: '14px',
                     fontWeight: 600,
                     color: '#475569'
                   }}>Bank Passbook Field (Optional)</label>
                   <select
                     className="select-modern"
                     value={config.bank_field_name}
-                    onChange={(e) => setConfig({...config, bank_field_name: e.target.value})}
+                    onChange={(e) => setConfig({ ...config, bank_field_name: e.target.value })}
                   >
                     <option value="">-- None --</option>
                     {availableFields.all_fields.map(field => (
@@ -783,17 +785,17 @@ export default function AutoExtractor() {
                 </div>
 
                 <div>
-                  <label style={{ 
-                    display: 'block', 
-                    marginBottom: '10px', 
-                    fontSize: '14px', 
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '10px',
+                    fontSize: '14px',
                     fontWeight: 600,
                     color: '#475569'
                   }}>Bill/Receipt Field (Optional)</label>
                   <select
                     className="select-modern"
                     value={config.bill_field_name}
-                    onChange={(e) => setConfig({...config, bill_field_name: e.target.value})}
+                    onChange={(e) => setConfig({ ...config, bill_field_name: e.target.value })}
                   >
                     <option value="">-- None --</option>
                     {availableFields.all_fields.map(field => (
@@ -808,9 +810,9 @@ export default function AutoExtractor() {
           {/* Step 3: Filters */}
           {availableFields.text_fields.length > 0 && (
             <div style={{ marginBottom: '40px' }}>
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
                 justifyContent: 'space-between',
                 marginBottom: '24px'
               }}>
@@ -931,10 +933,43 @@ export default function AutoExtractor() {
             </div>
           )}
 
+          {/* Include Already Extracted Toggle */}
+<div style={{
+  display: 'flex',
+  alignItems: 'center',
+  gap: '12px',
+  padding: '16px 20px',
+  background: includeAlreadyExtracted ? '#FEF3C7' : '#F8FAFC',
+  borderRadius: '12px',
+  border: '2px solid',
+  borderColor: includeAlreadyExtracted ? '#F59E0B' : '#E2E8F0',
+  marginBottom: '16px'
+}}>
+  <input
+    type="checkbox"
+    checked={includeAlreadyExtracted}
+    onChange={(e) => setIncludeAlreadyExtracted(e.target.checked)}
+    style={{
+      width: '20px',
+      height: '20px',
+      cursor: 'pointer',
+      accentColor: '#F59E0B'
+    }}
+  />
+  <div style={{ flex: 1 }}>
+    <div style={{ fontSize: '14px', fontWeight: 600, color: '#1E293B' }}>
+      Include already extracted records
+    </div>
+    <div style={{ fontSize: '12px', color: '#64748B' }}>
+      Show all {includeAlreadyExtracted ? '(including duplicates)' : '(only unprocessed)'}
+    </div>
+  </div>
+</div>
+
           {/* Load Records */}
-          <div style={{ 
-            display: 'flex', 
-            gap: '16px', 
+          <div style={{
+            display: 'flex',
+            gap: '16px',
             alignItems: 'center',
             padding: '24px',
             background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)',
@@ -990,7 +1025,7 @@ export default function AutoExtractor() {
                 </div>
               </div>
             </div>
-            
+
             <div className="stat-card">
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
@@ -1001,7 +1036,7 @@ export default function AutoExtractor() {
                 </div>
               </div>
             </div>
-            
+
             <div className="stat-card">
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
@@ -1012,7 +1047,7 @@ export default function AutoExtractor() {
                 </div>
               </div>
             </div>
-            
+
             <div className="stat-card">
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
@@ -1026,23 +1061,87 @@ export default function AutoExtractor() {
           </div>
 
           {/* Toolbar */}
-          <div className="glass-card" style={{ 
-            padding: '20px', 
+          <div className="glass-card" style={{
+            padding: '20px',
             marginBottom: '20px',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            gap: '20px'
+            gap: '20px',
+            flexWrap: 'wrap'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, maxWidth: '500px' }}>
-              <Search size={20} color="#8B5CF6" />
-              <input
-                type="text"
-                className="input-modern"
-                placeholder="Search by student name..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '300px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, maxWidth: '400px' }}>
+                <Search size={20} color="#8B5CF6" />
+                <input
+                  type="text"
+                  className="input-modern"
+                  placeholder="Search by student name..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+
+              {/* Quick Selection Buttons */}
+              <div style={{
+                display: 'flex',
+                gap: '8px',
+                borderLeft: '2px solid #E2E8F0',
+                paddingLeft: '16px',
+                marginLeft: '8px'
+              }}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 50).map(r => r.record_id)))}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600
+                  }}
+                  title="Select first 50 records"
+                >
+                  First 50
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 100).map(r => r.record_id)))}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600
+                  }}
+                  title="Select first 100 records"
+                >
+                  First 100
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 200).map(r => r.record_id)))}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600
+                  }}
+                  title="Select first 200 records"
+                >
+                  First 200
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setSelectedRecords(new Set())}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderColor: '#EF4444',
+                    color: '#EF4444'
+                  }}
+                  title="Clear selection"
+                >
+                  <XCircle size={14} />
+                  Clear
+                </button>
+              </div>
             </div>
 
             <button
@@ -1067,9 +1166,9 @@ export default function AutoExtractor() {
                         type="checkbox"
                         checked={selectedRecords.size === filteredRecords.length}
                         onChange={toggleSelectAll}
-                        style={{ 
-                          width: '20px', 
-                          height: '20px', 
+                        style={{
+                          width: '20px',
+                          height: '20px',
                           cursor: 'pointer',
                           accentColor: '#8B5CF6'
                         }}
@@ -1094,9 +1193,9 @@ export default function AutoExtractor() {
                           type="checkbox"
                           checked={selectedRecords.has(record.record_id)}
                           onChange={() => toggleSelectRecord(record.record_id)}
-                          style={{ 
-                            width: '20px', 
-                            height: '20px', 
+                          style={{
+                            width: '20px',
+                            height: '20px',
                             cursor: 'pointer',
                             accentColor: '#8B5CF6'
                           }}
@@ -1139,8 +1238,8 @@ export default function AutoExtractor() {
             </div>
 
             {/* Pagination */}
-            <div style={{ 
-              padding: '20px', 
+            <div style={{
+              padding: '20px',
               borderTop: '2px solid #F1F5F9',
               display: 'flex',
               justifyContent: 'space-between',
@@ -1180,9 +1279,9 @@ export default function AutoExtractor() {
           className="glass-card"
           style={{ padding: '48px' }}
         >
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
             justifyContent: 'space-between',
             marginBottom: '32px'
           }}>
@@ -1201,7 +1300,7 @@ export default function AutoExtractor() {
             <span style={{
               padding: '12px 24px',
               borderRadius: '12px',
-              background: jobStatus.status === 'running' 
+              background: jobStatus.status === 'running'
                 ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
                 : 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
               color: 'white',
@@ -1290,17 +1389,17 @@ export default function AutoExtractor() {
                   boxShadow: `0 12px 24px ${stat.color}20`
                 }}
               >
-                <div style={{ 
-                  fontSize: '36px', 
-                  fontWeight: 800, 
+                <div style={{
+                  fontSize: '36px',
+                  fontWeight: 800,
                   color: stat.color,
                   lineHeight: 1,
                   marginBottom: '8px'
                 }}>
                   {stat.value}
                 </div>
-                <div style={{ 
-                  fontSize: '12px', 
+                <div style={{
+                  fontSize: '12px',
                   color: '#64748B',
                   fontWeight: 600,
                   textTransform: 'uppercase',

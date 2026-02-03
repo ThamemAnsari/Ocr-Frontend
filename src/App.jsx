@@ -8,9 +8,11 @@ import {
   Clock,
   CheckCircle,
   Cpu,
-  Activity
+  Activity,
+  Database
 } from 'lucide-react'
 import AutoExtractor from './components/AutoExtractor'
+import ExtractedData from './components/ExtractedData'
 import './App.css'
 
 function App() {
@@ -43,7 +45,8 @@ function App() {
   }, [])
 
   const tabs = [
-    { id: 'auto-extract', label: 'Auto Extractor', icon: Zap, description: 'Intelligent batch processing' }
+    { id: 'auto-extract', label: 'Auto Extractor', icon: Zap, description: 'Intelligent batch processing' },
+    { id: 'extracted-data', label: 'Extracted Data', icon: Database, description: 'View all extracted data' }
   ]
 
   // Enhanced loading screen
@@ -604,6 +607,7 @@ function App() {
               }}
             >
               {activeTab === 'auto-extract' && <AutoExtractor />}
+              {activeTab === 'extracted-data' && <ExtractedData />}
             </motion.div>
           </AnimatePresence>
         </div>
