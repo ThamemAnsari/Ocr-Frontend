@@ -49,7 +49,6 @@ export default function AutoExtractor() {
   const [records, setRecords] = useState([])
   const [isLoadingRecords, setIsLoadingRecords] = useState(false)
   const [selectedRecords, setSelectedRecords] = useState(new Set())
-  const [includeAlreadyExtracted, setIncludeAlreadyExtracted] = useState(false)
 
   const [currentPage, setCurrentPage] = useState(1)
   const [recordsPerPage] = useState(50)
@@ -149,51 +148,70 @@ export default function AutoExtractor() {
     return criteria
   }
 
-  
-const loadRecords = async (fetchAll = true) => {
-  setIsLoadingRecords(true)
+  const loadRecords = async () => {
+    setIsLoadingRecords(true)
 
-  try {
-    const formData = new FormData()
-    formData.append('app_link_name', config.app_link_name)
-    formData.append('report_link_name', config.report_link_name)
+    try {
+      const formData = new FormData()
+      formData.append('app_link_name', config.app_link_name)
+      formData.append('report_link_name', config.report_link_name)
 
-    if (config.bank_field_name) formData.append('bank_field_name', config.bank_field_name)
-    if (config.bill_field_name) formData.append('bill_field_name', config.bill_field_name)
+      if (config.bank_field_name) formData.append('bank_field_name', config.bank_field_name)
+      if (config.bill_field_name) formData.append('bill_field_name', config.bill_field_name)
 
-    const builtCriteria = buildFilterCriteria()
-    if (builtCriteria) formData.append('filter_criteria', builtCriteria)
+      const builtCriteria = buildFilterCriteria()
+      if (builtCriteria) formData.append('filter_criteria', builtCriteria)
 
-    formData.append('store_images', 'false')
-    formData.append('fetch_all', fetchAll.toString())
-    formData.append('include_already_extracted', includeAlreadyExtracted.toString())  // ✅ NEW
+      // ✅ DON'T pre-store images - just load metadata
+      formData.append('store_images', 'false')
 
-    const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/preview`, {
-      method: 'POST',
-      body: formData
-    })
+      const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/preview`, {
+        method: 'POST',
+        body: formData
+      })
 
-    const data = await response.json()
-    if (data.success) {
-      const fullRecords = data.sample_records || []
-      setRecords(fullRecords)
-      setSelectedRecords(new Set())
-      setCurrentPage(1)
+      const data = await response.json()
+      if (data.success) {
+        const fullRecords = data.sample_records || []
+        setRecords(fullRecords)
+        setSelectedRecords(new Set())
+        setCurrentPage(1)
 
-      toast.success(
-        `✅ Loaded ${fullRecords.length} records out of ${data.total_in_zoho} total in Zoho\n${data.already_extracted_count > 0 ? `(${data.already_extracted_count} already extracted)` : ''}`,
-        {
-          icon: '🔍',
-          duration: 5000
+        // Show info about filtered records
+        if (data.already_extracted_count > 0) {
+          toast.success(
+            `✅ Loaded ${fullRecords.length} new records\n(Excluded ${data.already_extracted_count} already extracted)`,
+            {
+              icon: '🔍',
+              style: {
+                borderRadius: '12px',
+                background: '#8B5CF6',
+                color: 'white'
+              },
+              duration: 4000
+            }
+          )
+        } else {
+          toast.success(`✅ Loaded ${fullRecords.length} records (ready to process)`, {
+            icon: '⚡',
+            style: {
+              borderRadius: '12px',
+              background: '#8B5CF6',
+              color: 'white'
+            },
+            duration: 3000
+          })
         }
-      )
+      } else {
+        toast.error(`Error: ${data.error}`)
+      }
+    } catch (error) {
+      toast.error(`Failed to load records: ${error.message}`)
+    } finally {
+      setIsLoadingRecords(false)
     }
-  } catch (error) {
-    toast.error(`Failed to load records: ${error.message}`)
-  } finally {
-    setIsLoadingRecords(false)
   }
-}
+
   const startExtraction = async () => {
     if (selectedRecords.size === 0) {
       toast.error('Please select at least one record to process')
@@ -933,39 +951,6 @@ const loadRecords = async (fetchAll = true) => {
             </div>
           )}
 
-          {/* Include Already Extracted Toggle */}
-<div style={{
-  display: 'flex',
-  alignItems: 'center',
-  gap: '12px',
-  padding: '16px 20px',
-  background: includeAlreadyExtracted ? '#FEF3C7' : '#F8FAFC',
-  borderRadius: '12px',
-  border: '2px solid',
-  borderColor: includeAlreadyExtracted ? '#F59E0B' : '#E2E8F0',
-  marginBottom: '16px'
-}}>
-  <input
-    type="checkbox"
-    checked={includeAlreadyExtracted}
-    onChange={(e) => setIncludeAlreadyExtracted(e.target.checked)}
-    style={{
-      width: '20px',
-      height: '20px',
-      cursor: 'pointer',
-      accentColor: '#F59E0B'
-    }}
-  />
-  <div style={{ flex: 1 }}>
-    <div style={{ fontSize: '14px', fontWeight: 600, color: '#1E293B' }}>
-      Include already extracted records
-    </div>
-    <div style={{ fontSize: '12px', color: '#64748B' }}>
-      Show all {includeAlreadyExtracted ? '(including duplicates)' : '(only unprocessed)'}
-    </div>
-  </div>
-</div>
-
           {/* Load Records */}
           <div style={{
             display: 'flex',
@@ -1454,4 +1439,4 @@ const loadRecords = async (fetchAll = true) => {
       )}
     </div>
   )
-}
+  }
