@@ -9,11 +9,13 @@ import {
   CheckCircle,
   Cpu,
   Activity,
-  Database
+  Database,
+  DollarSign
 } from 'lucide-react'
 import AutoExtractor from './components/AutoExtractor'
 import ExtractedData from './components/ExtractedData'
 import './App.css'
+import EnhancedCostDashboard from './components/CostDashboard'
 
 function App() {
   const [activeTab, setActiveTab] = useState('auto-extract')
@@ -46,7 +48,8 @@ function App() {
 
   const tabs = [
     { id: 'auto-extract', label: 'Auto Extractor', icon: Zap, description: 'Intelligent batch processing' },
-    { id: 'extracted-data', label: 'Extracted Data', icon: Database, description: 'View all extracted data' }
+    { id: 'extracted-data', label: 'Extracted Data', icon: Database, description: 'View all extracted data' },
+    { id: 'cost', label: 'Cost Data', icon: DollarSign, description: 'View all cost data' }
   ]
 
   // Enhanced loading screen
@@ -608,6 +611,7 @@ function App() {
             >
               {activeTab === 'auto-extract' && <AutoExtractor />}
               {activeTab === 'extracted-data' && <ExtractedData />}
+              {activeTab === 'cost' && <EnhancedCostDashboard />}
             </motion.div>
           </AnimatePresence>
         </div>
