@@ -636,6 +636,143 @@ export default function AutoExtractor() {
             </div>
           )}
 
+          {/* Step 3: Filter Builder */}
+          {availableFields.text_fields.length > 0 && (
+            <div style={{ 
+              background: '#F8F9FA', 
+              padding: '20px', 
+              borderRadius: '12px',
+              marginBottom: '24px' 
+            }}>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between',
+                marginBottom: '16px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    background: '#FDB913',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700
+                  }}>3</div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#2C3E50' }}>
+                    Add Filters (Optional)
+                  </h3>
+                </div>
+
+                <button
+                  className="btn-secondary"
+                  onClick={addFilter}
+                  style={{ fontSize: '14px', padding: '8px 16px' }}
+                >
+                  <Plus size={16} />
+                  Add Filter
+                </button>
+              </div>
+
+              {filters.length > 0 && (
+                <div style={{ 
+                  background: 'white',
+                  borderRadius: '12px',
+                  padding: '16px'
+                }}>
+                  {filters.map((filter, idx) => (
+                    <div key={filter.id} style={{
+                      background: 'white',
+                      borderRadius: '10px',
+                      padding: '16px',
+                      marginBottom: '12px',
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 150px 1fr 40px',
+                      gap: '12px',
+                      alignItems: 'center',
+                      border: '2px solid #E0E0E0',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.borderColor = '#FDB913'}
+                    onMouseLeave={(e) => e.currentTarget.style.borderColor = '#E0E0E0'}>
+                      <select
+                        className="select-modern"
+                        value={filter.field}
+                        onChange={(e) => updateFilter(filter.id, 'field', e.target.value)}
+                      >
+                        {availableFields.text_fields.map(field => (
+                          <option key={field} value={field}>{field}</option>
+                        ))}
+                      </select>
+
+                      <select
+                        className="select-modern"
+                        value={filter.operator}
+                        onChange={(e) => updateFilter(filter.id, 'operator', e.target.value)}
+                      >
+                        <option value="==">equals</option>
+                        <option value="!=">not equals</option>
+                        <option value="contains">contains</option>
+                        <option value=">">greater than</option>
+                        <option value="<">less than</option>
+                        <option value="is_null">is empty</option>
+                        <option value="is_not_null">is not empty</option>
+                      </select>
+
+                      {!['is_null', 'is_not_null'].includes(filter.operator) && (
+                        <input
+                          type="text"
+                          className="input-modern"
+                          value={filter.value}
+                          onChange={(e) => updateFilter(filter.id, 'value', e.target.value)}
+                          placeholder="Enter value..."
+                        />
+                      )}
+
+                      <button
+                        onClick={() => removeFilter(filter.id)}
+                        style={{
+                          background: '#E74C3C',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          width: '36px',
+                          height: '36px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease'
+                        }}
+                        onMouseOver={(e) => e.currentTarget.style.background = '#C0392B'}
+                        onMouseOut={(e) => e.currentTarget.style.background = '#E74C3C'}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+
+                  {filters.length > 0 && (
+                    <div style={{ 
+                      marginTop: '16px', 
+                      padding: '12px', 
+                      background: '#F8F9FA', 
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontFamily: 'monospace',
+                      color: '#2C3E50'
+                    }}>
+                      <strong>Generated Criteria:</strong> {buildFilterCriteria() || 'No filters'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Load Records Button */}
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <button
