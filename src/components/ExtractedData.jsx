@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast, { Toaster } from 'react-hot-toast'
 import {
@@ -23,6 +23,7 @@ import {
   Sparkles
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
+import ZohoConfigModal from './ZohoConfigModal'
 
 // Initialize Supabase client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ohfnriyabohbvgxebllt.supabase.co'
@@ -72,10 +73,15 @@ export default function ExtractedData() {
   const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
-  const [recordsPerPage] = useState(20)
+  const [recordsPerPage, setRecordsPerPage] = useState(50) // Changed from 20 to 50 and made it mutable
   const [expandedRow, setExpandedRow] = useState(null)
   const [totalRecords, setTotalRecords] = useState(0)
   const [hoveredRow, setHoveredRow] = useState(null)
+  const [selectedView, setSelectedView] = useState({})
+  const [selectedBillIndex, setSelectedBillIndex] = useState({}) // Track which bill image to show
+  
+  // Tab state
+  const [activeTab, setActiveTab] = useState('need_to_push') // 'need_to_push' or 'pushed'
   
   // Selection & Sync states
   const [selectedRecords, setSelectedRecords] = useState(new Set())
@@ -83,29 +89,36 @@ export default function ExtractedData() {
   const [syncProgress, setSyncProgress] = useState(null)
   const [syncResult, setSyncResult] = useState(null)
   const [showConfetti, setShowConfetti] = useState(false)
+  
+  // Zoho Modal state
+  const [showZohoModal, setShowZohoModal] = useState(false)
 
   useEffect(() => {
     fetchExtractedData()
-  }, [currentPage])
+  }, []) // Fetch all data once on mount
 
   const fetchExtractedData = async () => {
     setIsLoading(true)
     try {
-      const from = (currentPage - 1) * recordsPerPage
-      const to = from + recordsPerPage - 1
-
+      // Fetch ALL records at once (no pagination in backend)
       const { data, error, count } = await supabase
         .from('auto_extraction_results')
         .select('*', { count: 'exact' })
         .order('id', { ascending: false })
-        .range(from, to)
 
       if (error) {
         throw error
       }
 
+      console.log('📊 Fetched data:', data?.length, 'records')
+      console.log('🔍 Push_status distribution:', {
+        pushed: data?.filter(r => r.Push_status === true).length,
+        notPushed: data?.filter(r => !r.Push_status || r.Push_status === false).length
+      })
+
       setExtractedData(data || [])
       setTotalRecords(count || 0)
+      setCurrentPage(1) // Reset to first page when fetching new data
       toast.success(`✨ Loaded ${data?.length || 0} records`, {
         style: {
           background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
@@ -134,11 +147,90 @@ export default function ExtractedData() {
   }
 
   const formatBillDataText = (data) => {
-    if (!data || Object.keys(data).length === 0) return 'N/A'
-    return `Student: ${data.student_name || 'N/A'} | College: ${data.college_name || 'N/A'} | Receipt: ${data.receipt_number || 'N/A'} | Roll: ${data.roll_number || 'N/A'} | Class: ${data.class_course || 'N/A'} | Date: ${data.bill_date || 'N/A'} | Amount: ₹${data.amount || 0}`
+    if (!data) return 'N/A'
+    const items = Array.isArray(data) ? data : [data]
+    if (items.length === 0) return 'N/A'
+
+    return items.map((item, index) => {
+      const prefix = items.length > 1 ? `Bill ${index + 1}: ` : ''
+      return `${prefix}Student: ${item.student_name || 'N/A'} | College: ${item.college_name || 'N/A'} | Receipt: ${item.receipt_number || 'N/A'} | Roll: ${item.roll_number || 'N/A'} | Class: ${item.class_course || 'N/A'} | Date: ${item.bill_date || 'N/A'} | Amount: ₹${item.amount || 0}`
+    }).join(' || ')
+  }
+
+  // Helper function to parse image URLs from JSON string format
+  const parseImageUrl = (imageField, index = 0) => {
+    if (!imageField) return null
+    
+    // If it's already a plain URL string, return it
+    if (typeof imageField === 'string' && imageField.startsWith('http')) {
+      return imageField
+    }
+    
+    // If it's a JSON string like '["https://..."]', parse it
+    if (typeof imageField === 'string') {
+      try {
+        const parsed = JSON.parse(imageField)
+        // If it's an array, get the element at index (default 0)
+        if (Array.isArray(parsed) && parsed.length > index) {
+          console.log('✅ Parsed image URL:', parsed[index])
+          return parsed[index]
+        }
+        // If it's a string after parsing, return it
+        if (typeof parsed === 'string') {
+          return parsed
+        }
+      } catch (e) {
+        console.log('⚠️ Failed to parse image field:', imageField, e)
+        // If parsing fails, return the original string
+        return imageField
+      }
+    }
+    
+    // If it's already an array, get the element at index
+    if (Array.isArray(imageField) && imageField.length > index) {
+      return imageField[index]
+    }
+    
+    return null
+  }
+  
+  // Helper to get all image URLs from a field (for multiple bills)
+  const parseAllImageUrls = (imageField) => {
+    if (!imageField) return []
+    
+    // If it's a JSON string like '["url1", "url2"]', parse it
+    if (typeof imageField === 'string') {
+      try {
+        const parsed = JSON.parse(imageField)
+        if (Array.isArray(parsed)) {
+          return parsed
+        }
+        return [parsed]
+      } catch {
+        return [imageField]
+      }
+    }
+    
+    // If it's already an array
+    if (Array.isArray(imageField)) {
+      return imageField
+    }
+    
+    return [imageField]
   }
 
   const filteredData = extractedData.filter(record => {
+    // First filter by tab (Push_status)
+    // Handle boolean true, string "true", string "pushed", or any truthy value
+    const isPushed = record.Push_status === true || 
+                     record.Push_status === 'true' || 
+                     record.Push_status === 'pushed' ||
+                     record.Push_status === 'TRUE'
+    
+    if (activeTab === 'need_to_push' && isPushed) return false
+    if (activeTab === 'pushed' && !isPushed) return false
+    
+    // Then filter by search query
     if (!searchQuery) return true
     const searchLower = searchQuery.toLowerCase()
     return (
@@ -149,7 +241,35 @@ export default function ExtractedData() {
     )
   })
 
-  const totalPages = Math.ceil(totalRecords / recordsPerPage)
+  // Debug logging
+  console.log('🎯 Active Tab:', activeTab)
+  console.log('📦 Total extracted data:', extractedData.length)
+  console.log('🔍 Filtered data:', filteredData.length)
+
+  // Client-side pagination
+  const totalPages = Math.ceil(filteredData.length / recordsPerPage)
+  const startIndex = (currentPage - 1) * recordsPerPage
+  const endIndex = startIndex + recordsPerPage
+  const paginatedData = filteredData.slice(startIndex, endIndex)
+
+  // Count records by push status
+  const needToPushCount = extractedData.filter(r => {
+    const isPushed = r.Push_status === true || 
+                     r.Push_status === 'true' || 
+                     r.Push_status === 'pushed' ||
+                     r.Push_status === 'TRUE'
+    return !isPushed
+  }).length
+  
+  const pushedCount = extractedData.filter(r => {
+    const isPushed = r.Push_status === true || 
+                     r.Push_status === 'true' || 
+                     r.Push_status === 'pushed' ||
+                     r.Push_status === 'TRUE'
+    return isPushed
+  }).length
+  
+  console.log('📊 Counts - Need to Push:', needToPushCount, '| Pushed:', pushedCount)
 
   const toggleSelectRecord = (recordId) => {
     setSelectedRecords(prev => {
@@ -164,80 +284,123 @@ export default function ExtractedData() {
   }
 
   const toggleSelectAll = () => {
-    if (selectedRecords.size === filteredData.length) {
-      setSelectedRecords(new Set())
-    } else {
-      setSelectedRecords(new Set(filteredData.map(r => r.id)))
-    }
-  }
-
-  const handleBulkPushToZoho = async () => {
-    if (selectedRecords.size === 0) {
-      toast.error('Please select at least one record to sync')
-      return
-    }
-
-    setIsSyncing(true)
-    setSyncResult(null)
-    setSyncProgress({ current: 0, total: selectedRecords.size })
-
-    try {
-      const recordsToSync = filteredData.filter(r => selectedRecords.has(r.id))
-
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setSyncProgress(prev => ({
-          ...prev,
-          current: Math.min(prev.current + 1, prev.total)
-        }))
-      }, 200)
-
-      const response = await fetch('http://localhost:8000/sync/bulk-push-to-zoho-selected', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          records: recordsToSync
-        })
+    // Check if all records on current page are selected
+    const currentPageIds = paginatedData.map(r => r.id)
+    const allCurrentPageSelected = currentPageIds.every(id => selectedRecords.has(id))
+    
+    if (allCurrentPageSelected) {
+      // Deselect all on current page
+      setSelectedRecords(prev => {
+        const newSet = new Set(prev)
+        currentPageIds.forEach(id => newSet.delete(id))
+        return newSet
       })
-
-      clearInterval(progressInterval)
-      const result = await response.json()
-
-      if (result.success) {
-        setSyncResult(result.details)
-        setShowConfetti(true)
-        setTimeout(() => setShowConfetti(false), 3000)
-        
-        toast.success(
-          `🎉 Sync complete! ${result.details.successful}/${result.details.total_records} records synced`,
-          { 
-            duration: 5000,
-            style: {
-              background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-              color: 'white',
-              fontWeight: 600
-            }
-          }
-        )
-        
-        setSelectedRecords(new Set())
-      } else {
-        toast.error('Sync failed: ' + (result.error || 'Unknown error'))
-      }
-    } catch (error) {
-      console.error('Sync error:', error)
-      toast.error('Error: ' + error.message)
-    } finally {
-      setIsSyncing(false)
-      setSyncProgress(null)
+    } else {
+      // Select all on current page
+      setSelectedRecords(prev => {
+        const newSet = new Set(prev)
+        currentPageIds.forEach(id => newSet.add(id))
+        return newSet
+      })
     }
   }
+
+  const selectAllFiltered = () => {
+    setSelectedRecords(new Set(filteredData.map(r => r.id)))
+    toast.success(`✅ Selected all ${filteredData.length} filtered records`, {
+      style: {
+        background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+        color: 'white',
+        fontWeight: 600
+      }
+    })
+  }
+
+  const deselectAll = () => {
+    setSelectedRecords(new Set())
+    toast.success('Cleared all selections', {
+      style: {
+        background: 'linear-gradient(135deg, #64748B 0%, #475569 100%)',
+        color: 'white',
+        fontWeight: 600
+      }
+    })
+  }
+
+const handleBulkPushToZoho = async () => {
+  if (selectedRecords.size === 0) {
+    toast.error('Please select at least one record to sync', {
+      icon: '⚠️',
+      style: {
+        background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+        color: 'white',
+        fontWeight: 600
+      }
+    })
+    return
+  }
+  
+  console.log('🚀 Opening Zoho config modal for records:', Array.from(selectedRecords))
+  
+  // Open the Zoho configuration modal
+  setShowZohoModal(true)
+}
+
+const handleZohoPushSuccess = async (result) => {
+  console.log('✅ Push success callback received:', result)
+  
+  // Show confetti animation
+  setShowConfetti(true)
+  setTimeout(() => setShowConfetti(false), 3000)
+  
+  // Update Push_status in Supabase for successfully synced records
+  if (result.successful > 0) {
+    const syncedRecordIds = Array.from(selectedRecords)
+    
+    try {
+      console.log('📝 Updating Push_status for records:', syncedRecordIds)
+      
+      const { error: updateError } = await supabase
+        .from('auto_extraction_results')
+        .update({ Push_status: true })
+        .in('id', syncedRecordIds)
+      
+      if (updateError) {
+        console.error('❌ Error updating Push_status:', updateError)
+        toast.error('Failed to update record status', {
+          icon: '⚠️'
+        })
+      } else {
+        console.log('✅ Successfully updated Push_status')
+        
+        // Refresh data to show updated status
+        await fetchExtractedData()
+        
+        toast.success(`✅ ${result.successful} records moved to "Pushed Data" tab`, {
+          duration: 3000,
+          style: {
+            background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+            color: 'white',
+            fontWeight: 600
+          }
+        })
+      }
+    } catch (updateErr) {
+      console.error('❌ Error updating records:', updateErr)
+      toast.error(`Error: ${updateErr.message}`, {
+        icon: '⚠️'
+      })
+    }
+  }
+  
+  // Clear selections
+  setSelectedRecords(new Set())
+  console.log('🧹 Cleared selections')
+}
 
   const handleExport = () => {
     const headers = [
-      'Record ID', 'Scholar Name', 'Scholar ID', 'Account No', 'Bank Name',
+      'Record ID', 'Scholar Name', 'Scholar ID', 'Tracking ID', 'Account No', 'Bank Name',
       'Holder Name', 'IFSC Code', 'Branch Name', 'Bill Data', 'Bill1_AMT',
       'Bill2_AMT', 'Bill3_AMT', 'Bill4_AMT', 'Bill5_AMT'
     ]
@@ -245,20 +408,26 @@ export default function ExtractedData() {
     const csvRows = [headers.join(',')]
 
     filteredData.forEach(record => {
-      const billData = parseJsonField(record.bill_data) || {}
+      const rawBillData = parseJsonField(record.bill_data)
+      const billDataArray = Array.isArray(rawBillData) ? rawBillData : (rawBillData ? [rawBillData] : [])
       const bankData = parseJsonField(record.bank_data) || {}
 
       const row = [
         record.record_id || '',
-        (billData.student_name || '').replace(/,/g, ';'),
-        billData.scholar_id || record.scholar_id || '',
+        (billDataArray[0]?.student_name || '').replace(/,/g, ';'),
+        billDataArray[0]?.scholar_id || record.scholar_id || '',
+        record.Tracking_id || '',
         bankData.account_number || '',
         (bankData.bank_name || '').replace(/,/g, ';'),
         (bankData.account_holder_name || '').replace(/,/g, ';'),
         bankData.ifsc_code || '',
         (bankData.branch_name || '').replace(/,/g, ';'),
-        formatBillDataText(billData).replace(/,/g, ';'),
-        billData.amount || '', '', '', '', ''
+        formatBillDataText(billDataArray).replace(/,/g, ';'),
+        billDataArray[0]?.amount || '',
+        billDataArray[1]?.amount || '',
+        billDataArray[2]?.amount || '',
+        billDataArray[3]?.amount || '',
+        billDataArray[4]?.amount || ''
       ]
 
       csvRows.push(row.map(field => `"${field}"`).join(','))
@@ -354,9 +523,9 @@ export default function ExtractedData() {
         >
           {[
             { icon: FileText, label: 'Total Records', value: totalRecords, color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.1)' },
-            { icon: CheckCircle, label: 'Selected', value: selectedRecords.size, color: '#10B981', bg: 'rgba(16, 185, 129, 0.1)' },
-            { icon: Search, label: 'Filtered Results', value: filteredData.length, color: '#EC4899', bg: 'rgba(236, 72, 153, 0.1)' },
-            { icon: TrendingUp, label: 'Success Rate', value: '98%', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)' }
+            { icon: Upload, label: 'Need to Push', value: needToPushCount, color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)' },
+            { icon: CheckCircle, label: 'Pushed', value: pushedCount, color: '#10B981', bg: 'rgba(16, 185, 129, 0.1)' },
+            { icon: Search, label: 'Selected', value: selectedRecords.size, color: '#EC4899', bg: 'rgba(236, 72, 153, 0.1)' }
           ].map((stat, idx) => (
             <motion.div
               key={stat.label}
@@ -402,44 +571,167 @@ export default function ExtractedData() {
             border: '1px solid rgba(0,0,0,0.05)'
           }}
         >
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-            {/* Search */}
-            <div style={{ flex: '1 1 300px', position: 'relative' }}>
-              <Search size={20} style={{ 
-                position: 'absolute', 
-                left: '16px', 
-                top: '50%', 
-                transform: 'translateY(-50%)',
-                color: '#8B5CF6'
-              }} />
-              <input
-                type="text"
-                placeholder="Search records..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '14px 16px 14px 48px',
-                  borderRadius: '12px',
-                  border: '2px solid #E5E7EB',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  outline: 'none',
-                  transition: 'all 0.3s',
-                  background: '#F9FAFB'
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = '#8B5CF6'
-                  e.target.style.background = 'white'
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = '#E5E7EB'
-                  e.target.style.background = '#F9FAFB'
-                }}
-              />
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            gap: '20px', 
+            flexWrap: 'wrap' 
+          }}>
+            {/* Left Side: Search + Quick Selection */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '12px', 
+              flex: 1, 
+              minWidth: '300px' 
+            }}>
+              {/* Search Box */}
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '12px', 
+                flex: 1, 
+                maxWidth: '400px',
+                position: 'relative'
+              }}>
+                <Search size={20} style={{ 
+                  position: 'absolute', 
+                  left: '16px', 
+                  top: '50%', 
+                  transform: 'translateY(-50%)',
+                  color: '#8B5CF6',
+                  zIndex: 1
+                }} />
+                <input
+                  type="text"
+                  placeholder="Search by student name..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px 12px 48px',
+                    borderRadius: '12px',
+                    border: '2px solid #E5E7EB',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    outline: 'none',
+                    transition: 'all 0.3s',
+                    background: 'white',
+                    color: '#1E293B',
+                    caretColor: '#8B5CF6'
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = '#8B5CF6'
+                    e.target.style.boxShadow = '0 0 0 3px rgba(139, 92, 246, 0.1)'
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = '#E5E7EB'
+                    e.target.style.boxShadow = 'none'
+                  }}
+                />
+              </div>
+
+              {/* Quick Selection Buttons */}
+              <div style={{
+                display: 'flex',
+                gap: '8px',
+                borderLeft: '2px solid #E2E8F0',
+                paddingLeft: '16px',
+                marginLeft: '8px'
+              }}>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setSelectedRecords(new Set(filteredData.slice(0, 50).map(r => r.id)))}
+                  disabled={filteredData.length === 0}
+                  style={{
+                    padding: '10px 16px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    borderRadius: '10px',
+                    border: '2px solid #E5E7EB',
+                    background: 'white',
+                    color: '#64748B',
+                    cursor: filteredData.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: filteredData.length === 0 ? 0.5 : 1,
+                    transition: 'all 0.2s'
+                  }}
+                  title="Select first 50 records"
+                >
+                  First 50
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setSelectedRecords(new Set(filteredData.slice(0, 100).map(r => r.id)))}
+                  disabled={filteredData.length === 0}
+                  style={{
+                    padding: '10px 16px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    borderRadius: '10px',
+                    border: '2px solid #E5E7EB',
+                    background: 'white',
+                    color: '#64748B',
+                    cursor: filteredData.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: filteredData.length === 0 ? 0.5 : 1,
+                    transition: 'all 0.2s'
+                  }}
+                  title="Select first 100 records"
+                >
+                  First 100
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setSelectedRecords(new Set(filteredData.slice(0, 200).map(r => r.id)))}
+                  disabled={filteredData.length === 0}
+                  style={{
+                    padding: '10px 16px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    borderRadius: '10px',
+                    border: '2px solid #E5E7EB',
+                    background: 'white',
+                    color: '#64748B',
+                    cursor: filteredData.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: filteredData.length === 0 ? 0.5 : 1,
+                    transition: 'all 0.2s'
+                  }}
+                  title="Select first 200 records"
+                >
+                  First 200
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={deselectAll}
+                  disabled={selectedRecords.size === 0}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '10px 16px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    borderRadius: '10px',
+                    border: '2px solid #EF4444',
+                    background: 'white',
+                    color: '#EF4444',
+                    cursor: selectedRecords.size === 0 ? 'not-allowed' : 'pointer',
+                    opacity: selectedRecords.size === 0 ? 0.5 : 1,
+                    transition: 'all 0.2s'
+                  }}
+                  title="Clear selection"
+                >
+                  <XCircle size={14} />
+                  Clear
+                </motion.button>
+              </div>
             </div>
 
-            {/* Action Buttons */}
+            {/* Right Side: Action Buttons */}
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <motion.button
                 whileHover={{ scale: 1.05 }}
@@ -450,7 +742,7 @@ export default function ExtractedData() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  padding: '12px 24px',
+                  padding: '12px 20px',
                   borderRadius: '12px',
                   border: 'none',
                   background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
@@ -475,7 +767,7 @@ export default function ExtractedData() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  padding: '12px 24px',
+                  padding: '12px 20px',
                   borderRadius: '12px',
                   border: '2px solid #8B5CF6',
                   background: 'white',
@@ -487,7 +779,7 @@ export default function ExtractedData() {
                 }}
               >
                 <Download size={16} />
-                Export CSV
+                Export
               </motion.button>
 
               <motion.button
@@ -499,7 +791,7 @@ export default function ExtractedData() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  padding: '12px 24px',
+                  padding: '12px 20px',
                   borderRadius: '12px',
                   border: 'none',
                   background: selectedRecords.size === 0 || isSyncing
@@ -747,7 +1039,7 @@ export default function ExtractedData() {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setSelectedRecords(new Set())}
+                onClick={deselectAll}
                 style={{
                   background: 'rgba(255,255,255,0.2)',
                   border: 'none',
@@ -765,16 +1057,120 @@ export default function ExtractedData() {
           )}
         </AnimatePresence>
 
-        {/* Data Table */}
+        {/* Tab Navigation */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
           style={{
             background: 'white',
-            borderRadius: '20px',
+            padding: '8px',
+            borderRadius: '20px 20px 0 0',
             boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
             border: '1px solid rgba(0,0,0,0.05)',
+            borderBottom: 'none',
+            display: 'flex',
+            gap: '8px'
+          }}
+        >
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => {
+              setActiveTab('need_to_push')
+              setCurrentPage(1)
+              setSelectedRecords(new Set())
+            }}
+            style={{
+              flex: 1,
+              padding: '16px 24px',
+              borderRadius: '14px',
+              border: 'none',
+              background: activeTab === 'need_to_push'
+                ? 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)'
+                : 'transparent',
+              color: activeTab === 'need_to_push' ? 'white' : '#64748B',
+              fontWeight: 700,
+              fontSize: '15px',
+              cursor: 'pointer',
+              transition: 'all 0.3s',
+              boxShadow: activeTab === 'need_to_push'
+                ? '0 4px 12px rgba(139, 92, 246, 0.3)'
+                : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px'
+            }}
+          >
+            <Upload size={20} />
+            <span>Need to Push</span>
+            <span style={{
+              background: activeTab === 'need_to_push' ? 'rgba(255,255,255,0.2)' : 'rgba(139, 92, 246, 0.1)',
+              padding: '4px 12px',
+              borderRadius: '12px',
+              fontSize: '13px',
+              fontWeight: 800
+            }}>
+              {needToPushCount}
+            </span>
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => {
+              setActiveTab('pushed')
+              setCurrentPage(1)
+              setSelectedRecords(new Set())
+            }}
+            style={{
+              flex: 1,
+              padding: '16px 24px',
+              borderRadius: '14px',
+              border: 'none',
+              background: activeTab === 'pushed'
+                ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+                : 'transparent',
+              color: activeTab === 'pushed' ? 'white' : '#64748B',
+              fontWeight: 700,
+              fontSize: '15px',
+              cursor: 'pointer',
+              transition: 'all 0.3s',
+              boxShadow: activeTab === 'pushed'
+                ? '0 4px 12px rgba(16, 185, 129, 0.3)'
+                : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px'
+            }}
+          >
+            <CheckCircle size={20} />
+            <span>Pushed Data</span>
+            <span style={{
+              background: activeTab === 'pushed' ? 'rgba(255,255,255,0.2)' : 'rgba(16, 185, 129, 0.1)',
+              padding: '4px 12px',
+              borderRadius: '12px',
+              fontSize: '13px',
+              fontWeight: 800
+            }}>
+              {pushedCount}
+            </span>
+          </motion.button>
+        </motion.div>
+
+        {/* Enhanced Data Table */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          style={{
+            background: 'white',
+            borderRadius: '0 0 20px 20px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+            border: '1px solid rgba(0,0,0,0.05)',
+            borderTop: 'none',
             overflow: 'hidden',
             marginBottom: '24px'
           }}
@@ -816,22 +1212,29 @@ export default function ExtractedData() {
               </p>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <div style={{
+              overflowX: 'auto',
+              borderRadius: '16px',
+              border: '1px solid #E5E7EB',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.04)'
+            }}>
               <table style={{ 
                 width: '100%', 
                 borderCollapse: 'separate',
                 borderSpacing: 0,
-                fontSize: '13px'
+                fontSize: '12px',
+                tableLayout: 'fixed',
+                background: 'white'
               }}>
                 <thead>
                   <tr style={{ 
-                    background: 'linear-gradient(135deg, #1E293B 0%, #334155 100%)',
+                    background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
                     color: 'white'
                   }}>
                     <th style={{ padding: '18px 16px', textAlign: 'center', fontWeight: 700, width: '60px', position: 'sticky', left: 0, background: 'inherit', zIndex: 2 }}>
                       <input
                         type="checkbox"
-                        checked={selectedRecords.size === filteredData.length && filteredData.length > 0}
+                        checked={paginatedData.length > 0 && paginatedData.every(r => selectedRecords.has(r.id))}
                         onChange={toggleSelectAll}
                         style={{
                           width: '18px',
@@ -841,144 +1244,910 @@ export default function ExtractedData() {
                         }}
                       />
                     </th>
-                    {['Record ID', 'Scholar Name', 'Scholar ID', 'Account No', 'Bank Name', 'Holder Name', 'IFSC Code', 'Amount', 'View'].map((header, idx) => (
-                      <th key={header} style={{ 
-                        padding: '18px 16px', 
-                        textAlign: idx === 7 ? 'right' : idx === 8 ? 'center' : 'left',
-                        fontWeight: 700,
-                        fontSize: '12px',
-                        letterSpacing: '0.5px',
-                        textTransform: 'uppercase',
-                        whiteSpace: 'nowrap',
-                        ...(idx === 8 ? { position: 'sticky', right: 0, background: 'inherit', zIndex: 2 } : {})
-                      }}>
-                        {header}
-                      </th>
-                    ))}
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '90px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Record ID
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '130px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Scholar Name
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '110px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Scholar ID
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '110px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Tracking ID
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '120px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Account No
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '130px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Bank Name
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '140px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Holder Name
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '100px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      IFSC Code
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '130px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Branch Name
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'left',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '280px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Bill Data
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'right',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '85px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Bill1 Amt
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'right',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '85px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Bill2 Amt
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'right',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '85px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Bill3 Amt
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'right',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '85px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Bill4 Amt
+                    </th>
+                    <th style={{
+                      padding: '16px 12px',
+                      textAlign: 'right',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      width: '85px',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Bill5 Amt
+                    </th>
+                    <th style={{
+                      padding: '16px 8px',
+                      textAlign: 'center',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      width: '50px'
+                    }}>
+                      View
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredData.map((record, index) => {
-                    const billData = parseJsonField(record.bill_data) || {}
+                  {paginatedData.map((record, index) => {
+                    const rawBillData = parseJsonField(record.bill_data)
+                    const billDataArray = Array.isArray(rawBillData) ? rawBillData : (rawBillData ? [rawBillData] : [])
                     const bankData = parseJsonField(record.bank_data) || {}
+                    
+                    // Debug logging
+                    if (index === 0) {
+                      console.log('🔍 First Record Debug:', {
+                        record_id: record.record_id,
+                        tracking_id: record.Tracking_id,
+                        bill_data_raw: record.bill_data,
+                        bill_data_parsed: rawBillData,
+                        bill_data_array: billDataArray,
+                        formatted: formatBillDataText(billDataArray)
+                      })
+                    }
+                    
                     const isExpanded = expandedRow === record.id
                     const isHovered = hoveredRow === record.id
                     const isSelected = selectedRecords.has(record.id)
                     
                     return (
-                      <motion.tr
-                        key={record.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.02 }}
-                        onMouseEnter={() => setHoveredRow(record.id)}
-                        onMouseLeave={() => setHoveredRow(null)}
-                        style={{
-                          borderBottom: '1px solid #F1F5F9',
-                          background: isSelected
-                            ? 'linear-gradient(90deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.04) 100%)'
-                            : isExpanded 
-                            ? 'linear-gradient(90deg, rgba(139, 92, 246, 0.12) 0%, rgba(139, 92, 246, 0.04) 100%)'
-                            : isHovered
-                            ? 'linear-gradient(90deg, rgba(139, 92, 246, 0.06) 0%, transparent 100%)'
-                            : 'white',
-                          transition: 'all 0.2s ease',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <td style={{ padding: '16px', textAlign: 'center', position: 'sticky', left: 0, background: 'inherit', zIndex: 1 }}>
-                          <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleSelectRecord(record.id)}
-                              onClick={(e) => e.stopPropagation()}
-                              style={{
-                                width: '18px',
-                                height: '18px',
-                                cursor: 'pointer',
-                                accentColor: '#10B981'
-                              }}
-                            />
-                          </motion.div>
-                        </td>
-                        <td style={{ padding: '16px', fontFamily: '"JetBrains Mono", monospace', fontSize: '11px', fontWeight: 700 }}>
-                          <span style={{
-                            background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
-                            padding: '6px 12px',
-                            borderRadius: '8px',
-                            color: 'white',
+                      <React.Fragment key={record.id}>
+                        <motion.tr
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.02 }}
+                          onMouseEnter={() => setHoveredRow(record.id)}
+                          onMouseLeave={() => setHoveredRow(null)}
+                          style={{
+                            borderBottom: '1px solid #F1F5F9',
+                            background: isSelected
+                              ? 'linear-gradient(90deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.04) 100%)'
+                              : isExpanded 
+                              ? 'linear-gradient(90deg, rgba(139, 92, 246, 0.12) 0%, rgba(139, 92, 246, 0.04) 100%)'
+                              : isHovered
+                              ? 'linear-gradient(90deg, rgba(139, 92, 246, 0.06) 0%, transparent 100%)'
+                              : index % 2 === 0
+                              ? 'white'
+                              : '#FAFBFC',
+                            transition: 'all 0.2s ease',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <td style={{ padding: '16px', textAlign: 'center', position: 'sticky', left: 0, background: 'inherit', zIndex: 1 }}>
+                            <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelectRecord(record.id)}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                  width: '18px',
+                                  height: '18px',
+                                  cursor: 'pointer',
+                                  accentColor: '#10B981'
+                                }}
+                              />
+                            </motion.div>
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#64748B',
+                            fontFamily: '"JetBrains Mono", monospace',
                             fontSize: '11px',
-                            fontWeight: 700,
-                            display: 'inline-block'
+                            fontWeight: 600,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
                           }}>
-                            {record.record_id}
-                          </span>
-                        </td>
-                        <td style={{ padding: '16px', color: '#1E293B', fontWeight: 600, fontSize: '13px' }}>
-                          {billData.student_name || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                        </td>
-                        <td style={{ padding: '16px', color: '#475569', fontFamily: '"JetBrains Mono", monospace', fontSize: '12px' }}>
-                          {billData.scholar_id || record.scholar_id || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                        </td>
-                        <td style={{ padding: '16px', color: '#475569', fontFamily: '"JetBrains Mono", monospace', fontSize: '12px' }}>
-                          {bankData.account_number || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                        </td>
-                        <td style={{ padding: '16px', color: '#10B981', fontSize: '13px', fontWeight: 600 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <Building size={14} />
+                            <span style={{
+                              background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+                              padding: '4px 8px',
+                              borderRadius: '6px',
+                              color: 'white',
+                              fontSize: '10px',
+                              fontWeight: 700
+                            }}>
+                              {record.record_id}
+                            </span>
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#1E293B',
+                            fontWeight: 600,
+                            fontSize: '12px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {billDataArray[0]?.student_name || <span style={{ color: '#CBD5E1' }}>N/A</span>}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#475569',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {billDataArray[0]?.scholar_id || record.scholar_id || <span style={{ color: '#CBD5E1' }}>N/A</span>}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#8B5CF6',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {record.Tracking_id || <span style={{ color: '#CBD5E1' }}>N/A</span>}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#475569',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {bankData.account_number || <span style={{ color: '#CBD5E1' }}>N/A</span>}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#10B981',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
                             {bankData.bank_name || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                          </div>
-                        </td>
-                        <td style={{ padding: '16px', color: '#475569', fontSize: '13px' }}>
-                          {bankData.account_holder_name || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                        </td>
-                        <td style={{ padding: '16px', color: '#475569', fontFamily: '"JetBrains Mono", monospace', fontSize: '12px', fontWeight: 600 }}>
-                          {bankData.ifsc_code || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                        </td>
-                        <td style={{ padding: '16px', textAlign: 'right', fontFamily: '"JetBrains Mono", monospace', fontSize: '13px', fontWeight: 700 }}>
-                          {billData.amount ? (
-                            <motion.span
-                              whileHover={{ scale: 1.05 }}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#475569',
+                            fontSize: '12px',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {bankData.account_holder_name || <span style={{ color: '#CBD5E1' }}>N/A</span>}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#475569',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {bankData.ifsc_code || <span style={{ color: '#CBD5E1' }}>N/A</span>}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#475569',
+                            fontSize: '12px',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {bankData.branch_name || <span style={{ color: '#CBD5E1' }}>N/A</span>}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: '#334155',
+                            fontSize: '11px',
+                            lineHeight: '1.5',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            borderRight: '1px solid #F1F5F9',
+                            fontWeight: 500
+                          }}>
+                            {formatBillDataText(billDataArray)}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: billDataArray[0]?.amount ? '#8B5CF6' : '#CBD5E1',
+                            fontWeight: 700,
+                            textAlign: 'right',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '12px',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {billDataArray[0]?.amount ? (
+                              <span style={{
+                                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%)',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                display: 'inline-block'
+                              }}>
+                                {Number(billDataArray[0].amount).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                              </span>
+                            ) : '0'}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: billDataArray[1]?.amount ? '#8B5CF6' : '#CBD5E1',
+                            fontWeight: 600,
+                            textAlign: 'right',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {billDataArray[1]?.amount ? (
+                              <span style={{
+                                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%)',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                display: 'inline-block'
+                              }}>
+                                {Number(billDataArray[1].amount).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                              </span>
+                            ) : '0'}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: billDataArray[2]?.amount ? '#8B5CF6' : '#CBD5E1',
+                            fontWeight: 600,
+                            textAlign: 'right',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {billDataArray[2]?.amount ? (
+                              <span style={{
+                                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%)',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                display: 'inline-block'
+                              }}>
+                                {Number(billDataArray[2].amount).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                              </span>
+                            ) : '0'}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: billDataArray[3]?.amount ? '#8B5CF6' : '#CBD5E1',
+                            fontWeight: 600,
+                            textAlign: 'right',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {billDataArray[3]?.amount ? (
+                              <span style={{
+                                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%)',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                display: 'inline-block'
+                              }}>
+                                {Number(billDataArray[3].amount).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                              </span>
+                            ) : '0'}
+                          </td>
+                          <td style={{
+                            padding: '14px 12px',
+                            color: billDataArray[4]?.amount ? '#8B5CF6' : '#CBD5E1',
+                            fontWeight: 600,
+                            textAlign: 'right',
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '11px',
+                            borderRight: '1px solid #F1F5F9'
+                          }}>
+                            {billDataArray[4]?.amount ? (
+                              <span style={{
+                                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%)',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                display: 'inline-block'
+                              }}>
+                                {Number(billDataArray[4].amount).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                              </span>
+                            ) : '0'}
+                          </td>
+                          <td style={{ padding: '14px 8px', textAlign: 'center' }}>
+                            <motion.button
+                              whileHover={{ scale: 1.15 }}
+                              whileTap={{ scale: 0.9 }}
+                              onClick={() => setExpandedRow(expandedRow === record.id ? null : record.id)}
                               style={{
-                                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(124, 58, 237, 0.15) 100%)',
-                                color: '#8B5CF6',
-                                padding: '6px 12px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: '6px',
                                 borderRadius: '8px',
-                                display: 'inline-block',
-                                fontWeight: 800
+                                border: 'none',
+                                background: expandedRow === record.id
+                                  ? 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)'
+                                  : isHovered
+                                    ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%)'
+                                    : '#F8FAFC',
+                                color: expandedRow === record.id ? 'white' : '#64748B',
+                                cursor: 'pointer',
+                                transition: 'all 0.3s',
+                                boxShadow: expandedRow === record.id
+                                  ? '0 4px 12px rgba(139, 92, 246, 0.3)'
+                                  : '0 2px 4px rgba(0, 0, 0, 0.05)'
                               }}
                             >
-                              ₹{Number(billData.amount).toLocaleString('en-IN')}
-                            </motion.span>
-                          ) : <span style={{ color: '#CBD5E1' }}>₹0</span>}
-                        </td>
-                        <td style={{ padding: '16px', textAlign: 'center', position: 'sticky', right: 0, background: 'inherit', zIndex: 1 }}>
-                          <motion.button
-                            whileHover={{ scale: 1.15, rotate: 5 }}
-                            whileTap={{ scale: 0.9 }}
-                            onClick={() => setExpandedRow(expandedRow === record.id ? null : record.id)}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              padding: '8px',
-                              borderRadius: '10px',
-                              border: 'none',
-                              background: expandedRow === record.id 
-                                ? 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)' 
-                                : 'linear-gradient(135deg, #F1F5F9 0%, #E2E8F0 100%)',
-                              color: expandedRow === record.id ? 'white' : '#64748B',
-                              cursor: 'pointer',
-                              boxShadow: expandedRow === record.id 
-                                ? '0 4px 12px rgba(139, 92, 246, 0.4)'
-                                : '0 2px 4px rgba(0, 0, 0, 0.05)'
-                            }}
-                          >
-                            <Eye size={16} />
-                          </motion.button>
-                        </td>
-                      </motion.tr>
+                              <Eye size={14} />
+                            </motion.button>
+                          </td>
+                        </motion.tr>
+
+                        {/* Expanded Row */}
+                        {expandedRow === record.id && (
+                          <tr>
+                            <td colSpan="16" style={{ padding: '0', background: 'linear-gradient(to bottom, #faf9fb 0%, #f8f7fa 100%)' }}>
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.3 }}
+                                style={{ padding: '32px' }}
+                              >
+                                {/* Toggle Buttons */}
+                                <div style={{
+                                  display: 'flex',
+                                  gap: '16px',
+                                  marginBottom: '32px',
+                                  justifyContent: 'center'
+                                }}>
+                                  <motion.button
+                                    whileHover={{ scale: 1.05, y: -2 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => {
+                                      const newView = { ...selectedView };
+                                      newView[record.id] = 'bill';
+                                      setSelectedView(newView);
+                                    }}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '10px',
+                                      padding: '14px 36px',
+                                      borderRadius: '14px',
+                                      border: 'none',
+                                      background: (!selectedView[record.id] || selectedView[record.id] === 'bill')
+                                        ? 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)'
+                                        : 'white',
+                                      color: (!selectedView[record.id] || selectedView[record.id] === 'bill') ? 'white' : '#64748B',
+                                      fontWeight: 700,
+                                      fontSize: '15px',
+                                      cursor: 'pointer',
+                                      boxShadow: (!selectedView[record.id] || selectedView[record.id] === 'bill')
+                                        ? '0 8px 24px rgba(139, 92, 246, 0.4)'
+                                        : '0 4px 12px rgba(0, 0, 0, 0.08)',
+                                      transition: 'all 0.3s',
+                                      letterSpacing: '0.3px'
+                                    }}
+                                  >
+                                    <Database size={20} />
+                                    View Bill Data
+                                  </motion.button>
+
+                                  <motion.button
+                                    whileHover={{ scale: 1.05, y: -2 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => {
+                                      const newView = { ...selectedView };
+                                      newView[record.id] = 'bank';
+                                      setSelectedView(newView);
+                                    }}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '10px',
+                                      padding: '14px 36px',
+                                      borderRadius: '14px',
+                                      border: 'none',
+                                      background: (selectedView[record.id] === 'bank')
+                                        ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+                                        : 'white',
+                                      color: (selectedView[record.id] === 'bank') ? 'white' : '#64748B',
+                                      fontWeight: 700,
+                                      fontSize: '15px',
+                                      cursor: 'pointer',
+                                      boxShadow: (selectedView[record.id] === 'bank')
+                                        ? '0 8px 24px rgba(16, 185, 129, 0.4)'
+                                        : '0 4px 12px rgba(0, 0, 0, 0.08)',
+                                      transition: 'all 0.3s',
+                                      letterSpacing: '0.3px'
+                                    }}
+                                  >
+                                    <Database size={20} />
+                                    View Bank Data
+                                  </motion.button>
+                                </div>
+
+                                {/* Content Area */}
+                                <motion.div
+                                  key={selectedView[record.id] || 'bill'}
+                                  initial={{ opacity: 0, y: 20 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ duration: 0.3 }}
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '450px 550px',
+                                    gap: '24px',
+                                    alignItems: 'start',
+                                    justifyContent: 'center'
+                                  }}
+                                >
+                                  {/* Left Side - Document Image */}
+                                  <div style={{
+                                    background: 'white',
+                                    borderRadius: '16px',
+                                    padding: '20px',
+                                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)',
+                                    border: '1px solid #E5E7EB',
+                                    maxWidth: '450px',
+                                    overflow: 'hidden'
+                                  }}>
+                                    <div style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '10px',
+                                      marginBottom: '16px',
+                                      paddingBottom: '12px',
+                                      borderBottom: '2px solid #F3F4F6'
+                                    }}>
+                                      <Eye size={20} style={{
+                                        color: (!selectedView[record.id] || selectedView[record.id] === 'bill') ? '#8B5CF6' : '#10B981'
+                                      }} />
+                                      <h4 style={{
+                                        margin: 0,
+                                        fontSize: '15px',
+                                        fontWeight: 700,
+                                        color: '#1E293B',
+                                        letterSpacing: '0.3px'
+                                      }}>
+                                        {(!selectedView[record.id] || selectedView[record.id] === 'bill')
+                                          ? 'Bill Image'
+                                          : 'Bank Passbook Image'}
+                                      </h4>
+                                    </div>
+
+                                    {(!selectedView[record.id] || selectedView[record.id] === 'bill') ? (
+                                      (() => {
+                                        const billImages = parseAllImageUrls(record.bill_image_supabase)
+                                        const currentBillIndex = selectedBillIndex[record.id] || 0
+                                        const currentImageUrl = billImages[currentBillIndex]
+                                        
+                                        return billImages.length > 0 && currentImageUrl ? (
+                                          <div style={{ position: 'relative', width: '100%', maxWidth: '418px' }}>
+                                            {/* Image Navigation for Multiple Bills */}
+                                            {billImages.length > 1 && (
+                                              <div style={{
+                                                display: 'flex',
+                                                gap: '8px',
+                                                marginBottom: '12px',
+                                                flexWrap: 'wrap'
+                                              }}>
+                                                {billImages.map((_, idx) => (
+                                                  <motion.button
+                                                    key={idx}
+                                                    whileHover={{ scale: 1.05 }}
+                                                    whileTap={{ scale: 0.95 }}
+                                                    onClick={() => setSelectedBillIndex(prev => ({ ...prev, [record.id]: idx }))}
+                                                    style={{
+                                                      padding: '8px 16px',
+                                                      borderRadius: '8px',
+                                                      border: currentBillIndex === idx ? '2px solid #8B5CF6' : '2px solid #E5E7EB',
+                                                      background: currentBillIndex === idx ? '#8B5CF6' : 'white',
+                                                      color: currentBillIndex === idx ? 'white' : '#64748B',
+                                                      fontSize: '12px',
+                                                      fontWeight: 600,
+                                                      cursor: 'pointer',
+                                                      transition: 'all 0.2s'
+                                                    }}
+                                                  >
+                                                    Bill {idx + 1}
+                                                  </motion.button>
+                                                ))}
+                                              </div>
+                                            )}
+                                            
+                                            <img
+                                              src={currentImageUrl}
+                                              alt={`Bill ${currentBillIndex + 1}`}
+                                              style={{
+                                                width: '100%',
+                                                height: 'auto',
+                                                maxHeight: '500px',
+                                                objectFit: 'contain',
+                                                borderRadius: '12px',
+                                                border: '2px solid #E5E7EB',
+                                                display: 'block',
+                                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
+                                              }}
+                                              onError={(e) => {
+                                                console.error('❌ Failed to load bill image:', currentImageUrl)
+                                                e.target.style.display = 'none'
+                                                e.target.nextSibling.style.display = 'flex'
+                                              }}
+                                            />
+                                            <div style={{
+                                              display: 'none',
+                                              flexDirection: 'column',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              padding: '40px 20px',
+                                              background: '#F8FAFC',
+                                              borderRadius: '12px',
+                                              border: '2px dashed #CBD5E1',
+                                              gap: '12px'
+                                            }}>
+                                              <AlertCircle size={32} style={{ color: '#94A3B8' }} />
+                                              <p style={{ color: '#64748B', fontSize: '13px', margin: 0, fontWeight: 600 }}>
+                                                Image not available
+                                              </p>
+                                              <a
+                                                href={currentImageUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{
+                                                  color: '#8B5CF6',
+                                                  textDecoration: 'underline',
+                                                  fontSize: '12px'
+                                                }}
+                                              >
+                                                Try opening in new tab
+                                              </a>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div style={{
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            padding: '60px 20px',
+                                            background: '#F8FAFC',
+                                            borderRadius: '12px',
+                                            border: '2px dashed #CBD5E1',
+                                            gap: '12px'
+                                          }}>
+                                            <AlertCircle size={48} style={{ color: '#94A3B8' }} />
+                                            <p style={{ color: '#64748B', fontSize: '14px', margin: 0, fontWeight: 600 }}>
+                                              No bill image available
+                                            </p>
+                                          </div>
+                                        )
+                                      })()
+                                    ) : (
+                                      (() => {
+                                        const bankImageUrl = parseImageUrl(record.bank_image_supabase)
+                                        console.log('🏦 Bank image field:', record.bank_image_supabase)
+                                        console.log('🏦 Parsed bank URL:', bankImageUrl)
+                                        
+                                        return bankImageUrl ? (
+                                          <div style={{ position: 'relative', width: '100%', maxWidth: '418px' }}>
+                                            <img
+                                              src={bankImageUrl}
+                                              alt="Bank Passbook"
+                                              style={{
+                                                width: '100%',
+                                                height: 'auto',
+                                                maxHeight: '500px',
+                                                objectFit: 'contain',
+                                                borderRadius: '12px',
+                                                border: '2px solid #E5E7EB',
+                                                display: 'block',
+                                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
+                                              }}
+                                              onError={(e) => {
+                                                console.error('❌ Failed to load bank image:', bankImageUrl)
+                                                e.target.style.display = 'none'
+                                                e.target.nextSibling.style.display = 'flex'
+                                              }}
+                                              onLoad={() => {
+                                                console.log('✅ Bank image loaded successfully:', bankImageUrl)
+                                              }}
+                                            />
+                                            <div style={{
+                                              display: 'none',
+                                              flexDirection: 'column',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              padding: '60px 20px',
+                                              background: '#F8FAFC',
+                                              borderRadius: '12px',
+                                              border: '2px dashed #CBD5E1',
+                                              gap: '12px'
+                                            }}>
+                                              <AlertCircle size={48} style={{ color: '#94A3B8' }} />
+                                              <p style={{ color: '#64748B', fontSize: '14px', margin: 0, fontWeight: 600 }}>
+                                                Image not available
+                                              </p>
+                                              <a
+                                                href={bankImageUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{
+                                                  color: '#10B981',
+                                                  textDecoration: 'underline',
+                                                  fontSize: '13px'
+                                                }}
+                                              >
+                                                Try opening in new tab
+                                              </a>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div style={{
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            padding: '60px 20px',
+                                            background: '#F8FAFC',
+                                            borderRadius: '12px',
+                                            border: '2px dashed #CBD5E1',
+                                            gap: '12px'
+                                          }}>
+                                            <AlertCircle size={48} style={{ color: '#94A3B8' }} />
+                                            <p style={{ color: '#64748B', fontSize: '14px', margin: 0, fontWeight: 600 }}>
+                                              No bank passbook image available
+                                            </p>
+                                            <p style={{ color: '#94A3B8', fontSize: '12px', margin: 0 }}>
+                                              Field value: {record.bank_image_supabase ? 'present but failed to parse' : 'null'}
+                                            </p>
+                                          </div>
+                                        )
+                                      })()
+                                    )}
+                                  </div>
+
+                                  {/* Right Side - JSON Data */}
+                                  <div style={{
+                                    background: 'white',
+                                    borderRadius: '16px',
+                                    padding: '20px',
+                                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)',
+                                    border: '1px solid #E5E7EB',
+                                    overflow: 'hidden',
+                                    maxWidth: '550px'
+                                  }}>
+                                    <div style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '10px',
+                                      marginBottom: '16px',
+                                      paddingBottom: '12px',
+                                      borderBottom: '2px solid #F3F4F6'
+                                    }}>
+                                      <Database size={20} style={{
+                                        color: (!selectedView[record.id] || selectedView[record.id] === 'bill') ? '#8B5CF6' : '#10B981'
+                                      }} />
+                                      <h4 style={{
+                                        margin: 0,
+                                        fontSize: '15px',
+                                        fontWeight: 700,
+                                        color: '#1E293B',
+                                        letterSpacing: '0.3px'
+                                      }}>
+                                        {(!selectedView[record.id] || selectedView[record.id] === 'bill')
+                                          ? 'Bill Data (JSON)'
+                                          : 'Bank Data (JSON)'}
+                                      </h4>
+                                    </div>
+
+                                    <pre style={{
+                                      background: 'linear-gradient(135deg, #fafbfc 0%, #f5f7fa 100%)',
+                                      padding: '18px',
+                                      borderRadius: '12px',
+                                      border: '2px solid #E5E7EB',
+                                      fontSize: '12px',
+                                      fontFamily: '"JetBrains Mono", "Courier New", Courier, monospace',
+                                      overflowX: 'auto',
+                                      maxHeight: '500px',
+                                      overflowY: 'auto',
+                                      color: '#1E293B',
+                                      margin: 0,
+                                      whiteSpace: 'pre',
+                                      wordWrap: 'normal',
+                                      lineHeight: '1.7',
+                                      tabSize: 2,
+                                      boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.06)'
+                                    }}>
+                                      {(!selectedView[record.id] || selectedView[record.id] === 'bill')
+                                        ? JSON.stringify(billDataArray, null, 2)
+                                        : JSON.stringify(bankData, null, 2)}
+                                    </pre>
+                                  </div>
+                                </motion.div>
+                              </motion.div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     )
                   })}
                 </tbody>
@@ -1007,8 +2176,41 @@ export default function ExtractedData() {
               marginBottom: '32px'
             }}
           >
-            <div style={{ fontSize: '14px', color: '#64748B', fontWeight: 600 }}>
-              Page {currentPage} of {totalPages}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '14px', color: '#64748B', fontWeight: 600 }}>
+                Page {currentPage} of {totalPages}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '13px', color: '#64748B', fontWeight: 600 }}>
+                  Records per page:
+                </span>
+                <select
+                  value={recordsPerPage}
+                  onChange={(e) => {
+                    setRecordsPerPage(Number(e.target.value))
+                    setCurrentPage(1) // Reset to first page when changing records per page
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '2px solid #E5E7EB',
+                    background: 'white',
+                    color: '#1E293B',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    outline: 'none'
+                  }}
+                >
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                </select>
+              </div>
+              <div style={{ fontSize: '13px', color: '#94A3B8' }}>
+                Showing {startIndex + 1}-{Math.min(endIndex, filteredData.length)} of {filteredData.length} records
+              </div>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <motion.button
@@ -1097,6 +2299,14 @@ export default function ExtractedData() {
           transform: scale(1.1);
         }
       `}</style>
+      
+      {/* Zoho Configuration Modal */}
+      <ZohoConfigModal
+        isOpen={showZohoModal}
+        onClose={() => setShowZohoModal(false)}
+        selectedRecords={selectedRecords}
+        onSuccess={handleZohoPushSuccess}
+      />
     </div>
   )
 }

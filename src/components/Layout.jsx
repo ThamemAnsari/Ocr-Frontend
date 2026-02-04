@@ -464,8 +464,7 @@ function Layout() {
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '20px 0',
-            gap: '32px',
-            flexWrap: 'wrap'
+            gap: '24px'
           }}>
             {/* Logo */}
             <motion.div
@@ -476,7 +475,8 @@ function Layout() {
                 alignItems: 'center',
                 gap: '16px',
                 cursor: 'pointer',
-                userSelect: 'none'
+                userSelect: 'none',
+                flex: '0 0 auto'
               }}
             >
               <motion.div
@@ -541,7 +541,11 @@ function Layout() {
               background: '#F1F5F9',
               padding: '6px',
               borderRadius: '14px',
-              boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.06)'
+              boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.06)',
+              flex: '1 1 auto',
+              justifyContent: 'center',
+              maxWidth: '600px',
+              margin: '0 auto'
             }}>
               {tabs.map((tab) => {
                 const Icon = tab.icon
@@ -553,7 +557,7 @@ function Layout() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '10px',
-                      padding: '12px 28px',
+                      padding: '12px 24px',
                       borderRadius: '10px',
                       border: 'none',
                       background: isActive
@@ -561,11 +565,12 @@ function Layout() {
                         : 'transparent',
                       color: isActive ? 'white' : '#475569',
                       fontWeight: 600,
-                      fontSize: '15px',
+                      fontSize: '14px',
                       cursor: 'pointer',
                       textDecoration: 'none',
                       transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                      boxShadow: isActive ? '0 4px 12px rgba(139, 92, 246, 0.3)' : 'none'
+                      boxShadow: isActive ? '0 4px 12px rgba(139, 92, 246, 0.3)' : 'none',
+                      whiteSpace: 'nowrap'
                     })}
                   >
                     <Icon size={18} />
@@ -575,7 +580,7 @@ function Layout() {
               })}
             </nav>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: '0 0 auto' }}>
               {/* Live Stats */}
               <motion.div
                 initial={{ opacity: 0, x: 20 }}

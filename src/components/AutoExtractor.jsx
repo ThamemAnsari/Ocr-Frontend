@@ -169,7 +169,8 @@ export default function AutoExtractor() {
       if (builtCriteria) formData.append('filter_criteria', builtCriteria)
 
       formData.append('store_images', 'false')
-      formData.append('fetch_all', 'false') // ✅ Only load first 1000
+       formData.append('fetch_all', 'true')        // ✓ CHANGED
+    formData.append('max_records_limit', '3000')
 
       const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/preview`, {
         method: 'POST',
@@ -645,55 +646,7 @@ export default function AutoExtractor() {
         }
       `}</style>
 
-      {/* Hero Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        style={{
-          background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
-          borderRadius: '24px',
-          padding: '48px',
-          marginBottom: '32px',
-          position: 'relative',
-          overflow: 'hidden',
-          boxShadow: '0 20px 60px rgba(139, 92, 246, 0.3)'
-        }}
-      >
-        <div style={{
-          position: 'absolute',
-          top: '-50%',
-          right: '-20%',
-          width: '600px',
-          height: '600px',
-          background: 'radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%)',
-          animation: 'pulse 6s ease-in-out infinite'
-        }} />
-
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
-            <Sparkles size={32} color="white" />
-            <h1 style={{
-              margin: 0,
-              fontSize: '36px',
-              fontWeight: 800,
-              color: 'white',
-              letterSpacing: '-1px'
-            }}>
-              Intelligent Auto Extractor
-            </h1>
-          </div>
-          <p style={{
-            fontSize: '18px',
-            color: 'rgba(255,255,255,0.9)',
-            margin: 0,
-            maxWidth: '700px',
-            lineHeight: 1.6
-          }}>
-            Process thousands of documents with AI-powered precision.
-            Real-time extraction with zero wait time.
-          </p>
-        </div>
-      </motion.div>
+      
 
       {/* Main Content Area */}
       <AnimatePresence mode="wait">
