@@ -12,7 +12,6 @@ import {
   Loader2,
   AlertCircle,
   TrendingUp,
-  TrendingDown,
   Activity,
   Clock,
   CheckCircle,
@@ -20,14 +19,23 @@ import {
   Zap,
   Sparkles,
   BarChart3,
-  FileText
+  FileText,
+  PieChart,
+  Calendar,
+  IndianRupee,
+  Filter,
+  Grid,
+  List
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
+import { LineChart, Line, BarChart, Bar, PieChart as RechartsPie, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts'
 
 // Initialize Supabase client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ohfnriyabohbvgxebllt.supabase.co'
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9oZm5yaXlhYm9oYnZneGVibGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQ2ODI2MTksImV4cCI6MjA1MDI1ODYxOX0.KI_E7vVgzDPpKj5Sh0fZvfaG7h5mq6c5NmqfvU7vU7c'
 const supabase = createClient(supabaseUrl, supabaseKey)
+
+const USD_TO_INR = 83 // Exchange rate
 
 export default function EnhancedCostDashboard() {
   const [costData, setCostData] = useState([])
@@ -37,21 +45,33 @@ export default function EnhancedCostDashboard() {
   const [recordsPerPage] = useState(20)
   const [expandedRow, setExpandedRow] = useState(null)
   const [totalRecords, setTotalRecords] = useState(0)
-  const [hoveredRow, setHoveredRow] = useState(null)
+  const [viewMode, setViewMode] = useState('table') // 'table' or 'charts'
+  const [dateRange, setDateRange] = useState('all') // 'today', 'week', 'month', 'all'
   
   // Stats
   const [stats, setStats] = useState({
     totalCost: 0,
+    totalCostINR: 0,
     totalTokens: 0,
     successRate: 0,
     avgProcessingTime: 0,
-    totalProcessed: 0
+    totalProcessed: 0,
+    bankCount: 0,
+    billCount: 0
+  })
+
+  // Chart data
+  const [chartData, setChartData] = useState({
+    dailyCosts: [],
+    docTypeDistribution: [],
+    methodDistribution: [],
+    hourlyActivity: []
   })
 
   useEffect(() => {
     fetchCostData()
     fetchStats()
-  }, [currentPage])
+  }, [currentPage, dateRange])
 
   const fetchCostData = async () => {
     setIsLoading(true)
@@ -59,23 +79,42 @@ export default function EnhancedCostDashboard() {
       const from = (currentPage - 1) * recordsPerPage
       const to = from + recordsPerPage - 1
 
-      const { data, error, count } = await supabase
+      let query = supabase
         .from('processing_logs')
         .select('*', { count: 'exact' })
         .order('timestamp', { ascending: false })
-        .range(from, to)
 
-      if (error) {
-        throw error
+      // Apply date filter
+      if (dateRange !== 'all') {
+        const now = new Date()
+        let startDate = new Date()
+        
+        if (dateRange === 'today') {
+          startDate.setHours(0, 0, 0, 0)
+        } else if (dateRange === 'week') {
+          startDate.setDate(now.getDate() - 7)
+        } else if (dateRange === 'month') {
+          startDate.setDate(now.getDate() - 30)
+        }
+        
+        query = query.gte('timestamp', startDate.toISOString())
       }
+
+      const { data, error, count } = await query.range(from, to)
+
+      if (error) throw error
 
       setCostData(data || [])
       setTotalRecords(count || 0)
-      toast.success(`✨ Loaded ${data?.length || 0} records`, {
+      
+      // Prepare chart data
+      prepareChartData(data || [])
+      
+      toast.success(`✅ Loaded ${data?.length || 0} records`, {
         style: {
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          color: '#fff',
-          fontWeight: '600'
+          borderRadius: '12px',
+          background: '#8B5CF6',
+          color: '#fff'
         }
       })
     } catch (error) {
@@ -88,9 +127,27 @@ export default function EnhancedCostDashboard() {
 
   const fetchStats = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('processing_logs')
-        .select('cost_usd, total_tokens, success, processing_time_ms')
+        .select('cost_usd, total_tokens, success, processing_time_ms, doc_type')
+
+      // Apply date filter
+      if (dateRange !== 'all') {
+        const now = new Date()
+        let startDate = new Date()
+        
+        if (dateRange === 'today') {
+          startDate.setHours(0, 0, 0, 0)
+        } else if (dateRange === 'week') {
+          startDate.setDate(now.getDate() - 7)
+        } else if (dateRange === 'month') {
+          startDate.setDate(now.getDate() - 30)
+        }
+        
+        query = query.gte('timestamp', startDate.toISOString())
+      }
+
+      const { data, error } = await query
 
       if (error) throw error
 
@@ -100,18 +157,74 @@ export default function EnhancedCostDashboard() {
         const successCount = data.filter(record => record.success).length
         const successRate = (successCount / data.length) * 100
         const avgTime = data.reduce((sum, record) => sum + (record.processing_time_ms || 0), 0) / data.length
+        const bankCount = data.filter(r => r.doc_type === 'bank').length
+        const billCount = data.filter(r => r.doc_type === 'bill').length
 
         setStats({
           totalCost: totalCost,
+          totalCostINR: totalCost * USD_TO_INR,
           totalTokens: totalTokens,
           successRate: successRate,
           avgProcessingTime: avgTime,
-          totalProcessed: data.length
+          totalProcessed: data.length,
+          bankCount: bankCount,
+          billCount: billCount
         })
       }
     } catch (error) {
       console.error('Error fetching stats:', error)
     }
+  }
+
+  const prepareChartData = (data) => {
+    // Daily costs
+    const dailyMap = {}
+    data.forEach(record => {
+      const date = new Date(record.timestamp).toLocaleDateString('en-IN')
+      if (!dailyMap[date]) {
+        dailyMap[date] = { date, cost: 0, tokens: 0, count: 0 }
+      }
+      dailyMap[date].cost += parseFloat(record.cost_usd) || 0
+      dailyMap[date].tokens += record.total_tokens || 0
+      dailyMap[date].count += 1
+    })
+    const dailyCosts = Object.values(dailyMap).slice(0, 15).reverse()
+
+    // Doc type distribution
+    const docTypes = data.reduce((acc, r) => {
+      const type = r.doc_type || 'unknown'
+      acc[type] = (acc[type] || 0) + 1
+      return acc
+    }, {})
+    const docTypeDistribution = Object.entries(docTypes).map(([name, value]) => ({ name, value }))
+
+    // Method distribution
+    const methods = data.reduce((acc, r) => {
+      const method = r.method || 'unknown'
+      acc[method] = (acc[method] || 0) + 1
+      return acc
+    }, {})
+    const methodDistribution = Object.entries(methods).map(([name, value]) => ({ name, value }))
+
+    // Hourly activity
+    const hourlyMap = {}
+    data.forEach(record => {
+      const hour = new Date(record.timestamp).getHours()
+      if (!hourlyMap[hour]) {
+        hourlyMap[hour] = { hour: `${hour}:00`, count: 0 }
+      }
+      hourlyMap[hour].count += 1
+    })
+    const hourlyActivity = Object.values(hourlyMap).sort((a, b) => 
+      parseInt(a.hour) - parseInt(b.hour)
+    )
+
+    setChartData({
+      dailyCosts,
+      docTypeDistribution,
+      methodDistribution,
+      hourlyActivity
+    })
   }
 
   const parseJsonField = (field) => {
@@ -134,8 +247,7 @@ export default function EnhancedCostDashboard() {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
+      minute: '2-digit'
     })
   }
 
@@ -146,8 +258,7 @@ export default function EnhancedCostDashboard() {
       record.filename?.toLowerCase().includes(searchLower) ||
       record.student_name?.toLowerCase().includes(searchLower) ||
       record.scholarship_id?.toLowerCase().includes(searchLower) ||
-      record.doc_type?.toLowerCase().includes(searchLower) ||
-      record.method?.toLowerCase().includes(searchLower)
+      record.doc_type?.toLowerCase().includes(searchLower)
     )
   })
 
@@ -160,14 +271,13 @@ export default function EnhancedCostDashboard() {
       'Filename',
       'Method',
       'Student Name',
-      'Scholarship ID',
       'Input Tokens',
       'Output Tokens',
       'Total Tokens',
       'Cost (USD)',
+      'Cost (INR)',
       'Processing Time (ms)',
-      'Success',
-      'Error Message'
+      'Success'
     ]
 
     const csvRows = [headers.join(',')]
@@ -179,14 +289,13 @@ export default function EnhancedCostDashboard() {
         (record.filename || '').replace(/,/g, ';'),
         record.method || '',
         (record.student_name || '').replace(/,/g, ';'),
-        record.scholarship_id || '',
         record.input_tokens || 0,
         record.output_tokens || 0,
         record.total_tokens || 0,
         record.cost_usd || 0,
+        ((record.cost_usd || 0) * USD_TO_INR).toFixed(2),
         record.processing_time_ms || 0,
-        record.success ? 'Yes' : 'No',
-        (record.error_message || '').replace(/,/g, ';')
+        record.success ? 'Yes' : 'No'
       ]
 
       csvRows.push(row.map(field => `"${field}"`).join(','))
@@ -197,1081 +306,563 @@ export default function EnhancedCostDashboard() {
     const url = URL.createObjectURL(dataBlob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `cost-data-${new Date().toISOString().split('T')[0]}.csv`
+    link.download = `cost-analytics-${new Date().toISOString().split('T')[0]}.csv`
     link.click()
     URL.revokeObjectURL(url)
-    toast.success('📊 Data exported successfully!', {
-      style: {
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        color: '#fff',
-        fontWeight: '600'
-      }
-    })
+    toast.success('📊 Data exported successfully!')
   }
 
-  const StatCard = ({ icon: Icon, label, value, color, gradient, delay }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay }}
-      whileHover={{ scale: 1.03, y: -5 }}
-      style={{
-        position: 'relative',
-        padding: '24px',
-        background: `linear-gradient(135deg, ${gradient[0]} 0%, ${gradient[1]} 100%)`,
-        borderRadius: '20px',
-        overflow: 'hidden',
-        boxShadow: '0 10px 40px rgba(0, 0, 0, 0.1)',
-        border: '1px solid rgba(255, 255, 255, 0.2)',
-        backdropFilter: 'blur(10px)'
-      }}
-    >
-      {/* Animated background orbs */}
-      <motion.div
-        animate={{
-          scale: [1, 1.2, 1],
-          opacity: [0.3, 0.5, 0.3]
-        }}
-        transition={{
-          duration: 4,
-          repeat: Infinity,
-          ease: "easeInOut"
-        }}
-        style={{
-          position: 'absolute',
-          top: -50,
-          right: -50,
-          width: 150,
-          height: 150,
-          background: 'radial-gradient(circle, rgba(255, 255, 255, 0.4), transparent)',
-          borderRadius: '50%',
-          pointerEvents: 'none'
-        }}
-      />
-      
-      <div style={{ position: 'relative', zIndex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '48px',
-            height: '48px',
-            background: 'rgba(255, 255, 255, 0.2)',
-            borderRadius: '14px',
-            backdropFilter: 'blur(10px)'
-          }}>
-            <Icon size={24} style={{ color: '#fff' }} />
-          </div>
-          <motion.div
-            animate={{ rotate: [0, 360] }}
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            style={{ opacity: 0.3 }}
-          >
-            <Sparkles size={20} style={{ color: '#fff' }} />
-          </motion.div>
-        </div>
-        
-        <div style={{ 
-          fontSize: '11px', 
-          color: 'rgba(255, 255, 255, 0.9)', 
-          fontWeight: '700', 
-          textTransform: 'uppercase', 
-          letterSpacing: '1px',
-          marginBottom: '8px'
-        }}>
-          {label}
-        </div>
-        
-        <motion.div 
-          initial={{ scale: 0.8 }}
-          animate={{ scale: 1 }}
-          transition={{ delay: delay + 0.2 }}
-          style={{ 
-            fontSize: '32px', 
-            fontWeight: '800', 
-            color: '#fff',
-            lineHeight: 1,
-            textShadow: '0 2px 10px rgba(0, 0, 0, 0.2)'
-          }}
-        >
-          {value}
-        </motion.div>
-      </div>
-
-      {/* Shimmer effect */}
-      <motion.div
-        animate={{
-          x: [-200, 200]
-        }}
-        transition={{
-          duration: 3,
-          repeat: Infinity,
-          ease: "linear"
-        }}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100px',
-          height: '100%',
-          background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent)',
-          transform: 'skewX(-20deg)',
-          pointerEvents: 'none'
-        }}
-      />
-    </motion.div>
-  )
+  const COLORS = ['#8B5CF6', '#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#EC4899']
 
   return (
-    <div style={{ 
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: '40px 20px',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      {/* Animated background */}
-      <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
-        <motion.div
-          animate={{
-            y: [0, -100, 0],
-            x: [0, 50, 0]
-          }}
-          transition={{
-            duration: 20,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-          style={{
-            position: 'absolute',
-            top: '10%',
-            left: '10%',
-            width: '300px',
-            height: '300px',
-            background: 'radial-gradient(circle, rgba(255, 255, 255, 0.1), transparent)',
-            borderRadius: '50%',
-            filter: 'blur(40px)'
-          }}
-        />
-        <motion.div
-          animate={{
-            y: [0, 100, 0],
-            x: [0, -50, 0]
-          }}
-          transition={{
-            duration: 25,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-          style={{
-            position: 'absolute',
-            bottom: '10%',
-            right: '10%',
-            width: '400px',
-            height: '400px',
-            background: 'radial-gradient(circle, rgba(255, 255, 255, 0.08), transparent)',
-            borderRadius: '50%',
-            filter: 'blur(60px)'
-          }}
-        />
-      </div>
-
-      <Toaster position="top-right" />
-      
-      <div style={{ maxWidth: '1600px', margin: '0 auto', position: 'relative', zIndex: 1 }}>
-        {/* Header Section */}
-        <motion.div
-          initial={{ opacity: 0, y: -30 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{
-            background: 'rgba(255, 255, 255, 0.1)',
-            backdropFilter: 'blur(20px)',
-            borderRadius: '24px',
-            padding: '40px',
-            marginBottom: '32px',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '24px' }}>
-            <div>
-              <motion.div 
-                initial={{ x: -20 }}
-                animate={{ x: 0 }}
-                style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}
-              >
-                <motion.div
-                  animate={{ 
-                    rotate: [0, 5, -5, 0],
-                    scale: [1, 1.1, 1]
-                  }}
-                  transition={{
-                    duration: 3,
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '56px',
-                    height: '56px',
-                    background: 'linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.9) 100%)',
-                    borderRadius: '16px',
-                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)'
-                  }}
-                >
-                  <BarChart3 size={32} style={{ color: '#667eea' }} />
-                </motion.div>
-                <h2 style={{ 
-                  margin: 0, 
-                  fontSize: '36px', 
-                  fontWeight: '900',
-                  color: '#fff',
-                  textShadow: '0 2px 20px rgba(0, 0, 0, 0.3)',
-                  letterSpacing: '-0.5px'
-                }}>
-                  Cost Analytics Dashboard
-                </h2>
-              </motion.div>
-              <p style={{ 
-                margin: 0, 
-                color: 'rgba(255, 255, 255, 0.9)', 
-                fontSize: '16px',
-                fontWeight: '500'
-              }}>
-                Real-time processing metrics and performance insights
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  fetchCostData()
-                  fetchStats()
-                }}
-                disabled={isLoading}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '14px 24px',
-                  borderRadius: '14px',
-                  border: 'none',
-                  background: 'rgba(255, 255, 255, 0.95)',
-                  color: '#667eea',
-                  fontWeight: '700',
-                  fontSize: '15px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
-                  opacity: isLoading ? 0.7 : 1,
-                  transition: 'all 0.3s'
-                }}
-              >
-                <RefreshCw size={18} className={isLoading ? 'spin' : ''} />
-                Refresh
-              </motion.button>
-
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleExport}
-                disabled={filteredData.length === 0}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '14px 24px',
-                  borderRadius: '14px',
-                  border: '2px solid rgba(255, 255, 255, 0.3)',
-                  background: 'rgba(255, 255, 255, 0.1)',
-                  backdropFilter: 'blur(10px)',
-                  color: '#fff',
-                  fontWeight: '700',
-                  fontSize: '15px',
-                  cursor: filteredData.length === 0 ? 'not-allowed' : 'pointer',
-                  opacity: filteredData.length === 0 ? 0.5 : 1,
-                  transition: 'all 0.3s'
-                }}
-              >
-                <Download size={18} />
-                Export CSV
-              </motion.button>
-            </div>
-          </div>
-
-          {/* Enhanced Stats Grid */}
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '20px',
-            marginTop: '32px'
-          }}>
-            <StatCard 
-              icon={DollarSign}
-              label="Total Cost"
-              value={`$${stats.totalCost.toFixed(4)}`}
-              gradient={['rgba(16, 185, 129, 0.9)', 'rgba(5, 150, 105, 0.9)']}
-              delay={0}
-            />
-            <StatCard 
-              icon={Zap}
-              label="Total Tokens"
-              value={stats.totalTokens.toLocaleString()}
-              gradient={['rgba(139, 92, 246, 0.9)', 'rgba(124, 58, 237, 0.9)']}
-              delay={0.1}
-            />
-            <StatCard 
-              icon={TrendingUp}
-              label="Success Rate"
-              value={`${stats.successRate.toFixed(1)}%`}
-              gradient={['rgba(59, 130, 246, 0.9)', 'rgba(37, 99, 235, 0.9)']}
-              delay={0.2}
-            />
-            <StatCard 
-              icon={Clock}
-              label="Avg Time"
-              value={`${(stats.avgProcessingTime / 1000).toFixed(2)}s`}
-              gradient={['rgba(236, 72, 153, 0.9)', 'rgba(219, 39, 119, 0.9)']}
-              delay={0.3}
-            />
-            <StatCard 
-              icon={Activity}
-              label="Processed"
-              value={stats.totalProcessed.toLocaleString()}
-              gradient={['rgba(245, 158, 11, 0.9)', 'rgba(217, 119, 6, 0.9)']}
-              delay={0.4}
-            />
-          </div>
-        </motion.div>
-
-        {/* Search Bar */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(20px)',
-            borderRadius: '20px',
-            padding: '24px',
-            marginBottom: '32px',
-            border: '1px solid rgba(255, 255, 255, 0.3)',
-            boxShadow: '0 10px 40px rgba(0, 0, 0, 0.15)'
-          }}
-        >
-          <div style={{ position: 'relative' }}>
-            <Search size={22} style={{ 
-              position: 'absolute', 
-              left: '20px', 
-              top: '50%', 
-              transform: 'translateY(-50%)',
-              color: '#667eea'
-            }} />
-            <input
-              type="text"
-              placeholder="Search by filename, student name, scholarship ID, doc type, or method..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '18px 20px 18px 56px',
-                borderRadius: '14px',
-                border: '2px solid transparent',
-                fontSize: '15px',
-                fontWeight: '500',
-                outline: 'none',
-                transition: 'all 0.3s',
-                background: 'rgba(102, 126, 234, 0.05)'
-              }}
-              onFocus={(e) => {
-                e.target.style.borderColor = '#667eea'
-                e.target.style.background = '#fff'
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = 'transparent'
-                e.target.style.background = 'rgba(102, 126, 234, 0.05)'
-              }}
-            />
-          </div>
-        </motion.div>
-
-        {/* Data Table */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(20px)',
-            borderRadius: '24px',
-            padding: '32px',
-            marginBottom: '32px',
-            border: '1px solid rgba(255, 255, 255, 0.3)',
-            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)'
-          }}
-        >
-          {isLoading ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '100px 20px',
-              gap: '20px'
-            }}>
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              >
-                <Loader2 size={56} style={{ color: '#667eea' }} />
-              </motion.div>
-              <p style={{ color: '#667eea', fontSize: '18px', fontWeight: '700' }}>
-                Loading analytics...
-              </p>
-            </div>
-          ) : filteredData.length === 0 ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '100px 20px',
-              gap: '20px'
-            }}>
-              <AlertCircle size={56} style={{ color: '#94A3B8' }} />
-              <p style={{ color: '#64748B', fontSize: '18px', fontWeight: '700' }}>
-                No data found
-              </p>
-              <p style={{ color: '#94A3B8', fontSize: '15px' }}>
-                {searchQuery ? 'Try a different search query' : 'Process documents to see analytics'}
-              </p>
-            </div>
-          ) : (
-            <div style={{ 
-              overflowX: 'auto',
-              borderRadius: '20px',
-              border: '1px solid rgba(102, 126, 234, 0.1)'
-            }}>
-              <table style={{ 
-                width: '100%', 
-                borderCollapse: 'separate',
-                borderSpacing: 0,
-                fontSize: '13px',
-                background: 'white'
-              }}>
-                <thead>
-                  <tr style={{ 
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    color: 'white'
-                  }}>
-                    {['Timestamp', 'Doc Type', 'Filename', 'Method', 'Student Name', 'Input', 'Output', 'Total', 'Cost', 'Time', 'Status', 'View'].map((header, i) => (
-                      <th key={i} style={{ 
-                        padding: '18px 14px', 
-                        textAlign: ['Input', 'Output', 'Total', 'Cost', 'Time'].includes(header) ? 'right' : header === 'Status' || header === 'View' ? 'center' : 'left',
-                        fontWeight: '800', 
-                        fontSize: '11px',
-                        letterSpacing: '1px',
-                        textTransform: 'uppercase',
-                        borderRight: i < 11 ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  <AnimatePresence>
-                    {filteredData.map((record, index) => {
-                      const isExpanded = expandedRow === record.id
-                      const isHovered = hoveredRow === record.id
-                      const extractedData = parseJsonField(record.extracted_data) || {}
-                      
-                      return (
-                        <>
-                          <motion.tr
-                            key={record.id}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: 20 }}
-                            transition={{ delay: index * 0.02 }}
-                            onMouseEnter={() => setHoveredRow(record.id)}
-                            onMouseLeave={() => setHoveredRow(null)}
-                            style={{
-                              borderBottom: '1px solid rgba(102, 126, 234, 0.08)',
-                              background: isExpanded 
-                                ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.08) 100%)'
-                                : isHovered
-                                ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.06) 0%, rgba(255, 255, 255, 0) 100%)'
-                                : index % 2 === 0 
-                                ? 'white'
-                                : 'rgba(102, 126, 234, 0.02)',
-                              transition: 'all 0.3s ease',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#64748B', 
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {formatDate(record.timestamp)}
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              <span style={{
-                                background: record.doc_type === 'bank' 
-                                  ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-                                  : 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
-                                padding: '6px 12px',
-                                borderRadius: '10px',
-                                color: 'white',
-                                fontSize: '11px',
-                                fontWeight: '800',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.5px',
-                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
-                              }}>
-                                {record.doc_type || 'N/A'}
-                              </span>
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#475569', 
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)',
-                              maxWidth: '200px',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap'
-                            }} title={record.filename}>
-                              {record.filename || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#667eea', 
-                              fontSize: '11px',
-                              fontWeight: '800',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)',
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.5px',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {record.method || 'N/A'}
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#1E293B', 
-                              fontSize: '13px',
-                              fontWeight: '700',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)',
-                              maxWidth: '150px',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap'
-                            }} title={record.student_name}>
-                              {record.student_name || <span style={{ color: '#CBD5E1' }}>N/A</span>}
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#8B5CF6', 
-                              fontWeight: '800', 
-                              textAlign: 'right', 
-                              fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '12px',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)'
-                            }}>
-                              {(record.input_tokens || 0).toLocaleString()}
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#EC4899', 
-                              fontWeight: '800', 
-                              textAlign: 'right', 
-                              fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '12px',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)'
-                            }}>
-                              {(record.output_tokens || 0).toLocaleString()}
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#3B82F6', 
-                              fontWeight: '800', 
-                              textAlign: 'right', 
-                              fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '12px',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)'
-                            }}>
-                              {(record.total_tokens || 0).toLocaleString()}
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              textAlign: 'right',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)'
-                            }}>
-                              <span style={{
-                                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.1) 100%)',
-                                padding: '8px 14px',
-                                borderRadius: '10px',
-                                color: '#10B981',
-                                fontWeight: '900',
-                                fontSize: '13px',
-                                fontFamily: '"JetBrains Mono", monospace',
-                                display: 'inline-block',
-                                border: '1px solid rgba(16, 185, 129, 0.2)'
-                              }}>
-                                ${(record.cost_usd || 0).toFixed(6)}
-                              </span>
-                            </td>
-                            <td style={{ 
-                              padding: '16px 14px', 
-                              color: '#F59E0B', 
-                              fontWeight: '800', 
-                              textAlign: 'right', 
-                              fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '12px',
-                              borderRight: '1px solid rgba(102, 126, 234, 0.06)'
-                            }}>
-                              {(record.processing_time_ms || 0).toLocaleString()}
-                            </td>
-                            <td style={{ padding: '16px 14px', textAlign: 'center', borderRight: '1px solid rgba(102, 126, 234, 0.06)' }}>
-                              {record.success ? (
-                                <motion.div
-                                  whileHover={{ scale: 1.1 }}
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.15) 100%)',
-                                    color: '#10B981',
-                                    padding: '8px 16px',
-                                    borderRadius: '10px',
-                                    fontSize: '11px',
-                                    fontWeight: '800',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px',
-                                    border: '1px solid rgba(16, 185, 129, 0.3)',
-                                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.15)'
-                                  }}
-                                >
-                                  <CheckCircle size={14} />
-                                  Success
-                                </motion.div>
-                              ) : (
-                                <motion.div
-                                  whileHover={{ scale: 1.1 }}
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(220, 38, 38, 0.15) 100%)',
-                                    color: '#EF4444',
-                                    padding: '8px 16px',
-                                    borderRadius: '10px',
-                                    fontSize: '11px',
-                                    fontWeight: '800',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px',
-                                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                                    boxShadow: '0 4px 12px rgba(239, 68, 68, 0.15)'
-                                  }}
-                                >
-                                  <XCircle size={14} />
-                                  Failed
-                                </motion.div>
-                              )}
-                            </td>
-                            <td style={{ padding: '16px 14px', textAlign: 'center' }}>
-                              <motion.button
-                                whileHover={{ scale: 1.15 }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={() => setExpandedRow(expandedRow === record.id ? null : record.id)}
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  width: '36px',
-                                  height: '36px',
-                                  borderRadius: '10px',
-                                  border: 'none',
-                                  background: expandedRow === record.id 
-                                    ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
-                                    : 'rgba(102, 126, 234, 0.1)',
-                                  color: expandedRow === record.id ? 'white' : '#667eea',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.3s',
-                                  boxShadow: expandedRow === record.id 
-                                    ? '0 6px 20px rgba(102, 126, 234, 0.4)'
-                                    : 'none'
-                                }}
-                              >
-                                <Eye size={16} />
-                              </motion.button>
-                            </td>
-                          </motion.tr>
-                          
-                          {/* Expanded Row */}
-                          <AnimatePresence>
-                            {expandedRow === record.id && (
-                              <motion.tr
-                                key={`expanded-${record.id}`}
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                              >
-                                <td colSpan="12" style={{ padding: '0', background: 'linear-gradient(to bottom, rgba(102, 126, 234, 0.04) 0%, rgba(118, 75, 162, 0.02) 100%)' }}>
-                                  <motion.div
-                                    initial={{ height: 0 }}
-                                    animate={{ height: 'auto' }}
-                                    exit={{ height: 0 }}
-                                    transition={{ duration: 0.3 }}
-                                    style={{ padding: '40px', overflow: 'hidden' }}
-                                  >
-                                    <div style={{
-                                      display: 'grid',
-                                      gridTemplateColumns: record.image_url ? '450px 1fr' : '1fr',
-                                      gap: '32px',
-                                      alignItems: 'start'
-                                    }}>
-                                      {/* Image Preview */}
-                                      {record.image_url && (
-                                        <motion.div 
-                                          initial={{ opacity: 0, x: -20 }}
-                                          animate={{ opacity: 1, x: 0 }}
-                                          style={{
-                                            background: 'white',
-                                            borderRadius: '20px',
-                                            padding: '24px',
-                                            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
-                                            border: '1px solid rgba(102, 126, 234, 0.1)'
-                                          }}
-                                        >
-                                          <div style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '12px',
-                                            marginBottom: '20px',
-                                            paddingBottom: '16px',
-                                            borderBottom: '2px solid rgba(102, 126, 234, 0.1)'
-                                          }}>
-                                            <FileText size={22} style={{ color: '#667eea' }} />
-                                            <h4 style={{ 
-                                              margin: 0, 
-                                              fontSize: '16px', 
-                                              fontWeight: '800',
-                                              color: '#1E293B'
-                                            }}>
-                                              Processed Image
-                                            </h4>
-                                          </div>
-                                          <img 
-                                            src={record.image_url}
-                                            alt="Processed document"
-                                            style={{
-                                              width: '100%',
-                                              height: 'auto',
-                                              maxHeight: '500px',
-                                              objectFit: 'contain',
-                                              borderRadius: '16px',
-                                              border: '2px solid rgba(102, 126, 234, 0.1)',
-                                              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                                            }}
-                                            onError={(e) => {
-                                              e.target.style.display = 'none'
-                                            }}
-                                          />
-                                        </motion.div>
-                                      )}
-
-                                      {/* Details Panel */}
-                                      <motion.div 
-                                        initial={{ opacity: 0, x: 20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        style={{
-                                          background: 'white',
-                                          borderRadius: '20px',
-                                          padding: '24px',
-                                          boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
-                                          border: '1px solid rgba(102, 126, 234, 0.1)'
-                                        }}
-                                      >
-                                        <div style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '12px',
-                                          marginBottom: '24px',
-                                          paddingBottom: '16px',
-                                          borderBottom: '2px solid rgba(102, 126, 234, 0.1)'
-                                        }}>
-                                          <Activity size={22} style={{ color: '#667eea' }} />
-                                          <h4 style={{ 
-                                            margin: 0, 
-                                            fontSize: '16px', 
-                                            fontWeight: '800',
-                                            color: '#1E293B'
-                                          }}>
-                                            Processing Details
-                                          </h4>
-                                        </div>
-
-                                        <div style={{
-                                          display: 'grid',
-                                          gridTemplateColumns: 'repeat(2, 1fr)',
-                                          gap: '20px',
-                                          marginBottom: '24px'
-                                        }}>
-                                          <div style={{
-                                            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.04) 100%)',
-                                            padding: '18px',
-                                            borderRadius: '16px',
-                                            border: '1px solid rgba(102, 126, 234, 0.1)'
-                                          }}>
-                                            <div style={{ fontSize: '11px', color: '#64748B', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                                              Scholarship ID
-                                            </div>
-                                            <div style={{ fontSize: '15px', fontWeight: '800', color: '#1E293B', fontFamily: '"JetBrains Mono", monospace' }}>
-                                              {record.scholarship_id || 'N/A'}
-                                            </div>
-                                          </div>
-
-                                          <div style={{
-                                            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.04) 100%)',
-                                            padding: '18px',
-                                            borderRadius: '16px',
-                                            border: '1px solid rgba(102, 126, 234, 0.1)'
-                                          }}>
-                                            <div style={{ fontSize: '11px', color: '#64748B', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                                              Created At
-                                            </div>
-                                            <div style={{ fontSize: '13px', fontWeight: '700', color: '#475569' }}>
-                                              {formatDate(record.created_at)}
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Error Message */}
-                                        {!record.success && record.error_message && (
-                                          <motion.div
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            style={{
-                                              background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(220, 38, 38, 0.08) 100%)',
-                                              padding: '20px',
-                                              borderRadius: '16px',
-                                              border: '2px solid rgba(239, 68, 68, 0.2)',
-                                              marginBottom: '24px'
-                                            }}
-                                          >
-                                            <div style={{
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              gap: '10px',
-                                              marginBottom: '10px'
-                                            }}>
-                                              <AlertCircle size={18} style={{ color: '#EF4444' }} />
-                                              <div style={{ fontSize: '12px', color: '#EF4444', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                                                Error Message
-                                              </div>
-                                            </div>
-                                            <div style={{ fontSize: '13px', color: '#991B1B', fontFamily: '"JetBrains Mono", monospace', lineHeight: 1.6 }}>
-                                              {record.error_message}
-                                            </div>
-                                          </motion.div>
-                                        )}
-
-                                        {/* Extracted Data */}
-                                        <div>
-                                          <div style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '10px',
-                                            marginBottom: '16px'
-                                          }}>
-                                            <Activity size={18} style={{ color: '#667eea' }} />
-                                            <div style={{ fontSize: '12px', color: '#64748B', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                                              Extracted Data (JSON)
-                                            </div>
-                                          </div>
-                                          <pre style={{
-                                            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.04) 0%, rgba(118, 75, 162, 0.02) 100%)',
-                                            padding: '20px',
-                                            borderRadius: '16px',
-                                            border: '2px solid rgba(102, 126, 234, 0.1)',
-                                            fontSize: '12px',
-                                            fontFamily: '"JetBrains Mono", "Courier New", Courier, monospace',
-                                            overflowX: 'auto',
-                                            maxHeight: '400px',
-                                            overflowY: 'auto',
-                                            color: '#1E293B',
-                                            margin: 0,
-                                            whiteSpace: 'pre',
-                                            lineHeight: '1.8',
-                                            boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.05)'
-                                          }}>
-                                            {JSON.stringify(extractedData, null, 2)}
-                                          </pre>
-                                        </div>
-                                      </motion.div>
-                                    </div>
-                                  </motion.div>
-                                </td>
-                              </motion.tr>
-                            )}
-                          </AnimatePresence>
-                        </>
-                      )
-                    })}
-                  </AnimatePresence>
-                </tbody>
-              </table>
-            </div>
-          )}
-        </motion.div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            style={{
-              background: 'rgba(255, 255, 255, 0.95)',
-              backdropFilter: 'blur(20px)',
-              borderRadius: '20px',
-              padding: '28px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '24px',
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 10px 40px rgba(0, 0, 0, 0.15)'
-            }}
-          >
-            <div style={{ 
-              color: '#64748B', 
-              fontSize: '15px', 
-              fontWeight: '700'
-            }}>
-              Showing <span style={{ color: '#667eea', fontWeight: '900' }}>{((currentPage - 1) * recordsPerPage) + 1}</span> to <span style={{ color: '#667eea', fontWeight: '900' }}>{Math.min(currentPage * recordsPerPage, totalRecords)}</span> of <span style={{ color: '#667eea', fontWeight: '900' }}>{totalRecords}</span> records
-            </div>
-            
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <motion.button
-                whileHover={{ scale: currentPage === 1 ? 1 : 1.05, x: currentPage === 1 ? 0 : -3 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                disabled={currentPage === 1}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '14px 24px',
-                  borderRadius: '14px',
-                  border: 'none',
-                  background: currentPage === 1 ? 'rgba(226, 232, 240, 0.5)' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  color: currentPage === 1 ? '#CBD5E1' : 'white',
-                  fontWeight: '800',
-                  fontSize: '14px',
-                  cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s',
-                  boxShadow: currentPage === 1 ? 'none' : '0 6px 20px rgba(102, 126, 234, 0.3)'
-                }}
-              >
-                <ChevronLeft size={18} />
-                Previous
-              </motion.button>
-
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center',
-                padding: '14px 28px',
-                fontWeight: '800',
-                fontSize: '15px',
-                color: '#1E293B',
-                background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.1) 100%)',
-                borderRadius: '14px',
-                border: '2px solid rgba(102, 126, 234, 0.2)'
-              }}>
-                Page <span style={{ color: '#667eea', margin: '0 8px', fontSize: '18px' }}>{currentPage}</span> of <span style={{ color: '#667eea', margin: '0 8px', fontSize: '18px' }}>{totalPages}</span>
-              </div>
-
-              <motion.button
-                whileHover={{ scale: currentPage === totalPages ? 1 : 1.05, x: currentPage === totalPages ? 0 : 3 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '14px 24px',
-                  borderRadius: '14px',
-                  border: 'none',
-                  background: currentPage === totalPages ? 'rgba(226, 232, 240, 0.5)' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  color: currentPage === totalPages ? '#CBD5E1' : 'white',
-                  fontWeight: '800',
-                  fontSize: '14px',
-                  cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s',
-                  boxShadow: currentPage === totalPages ? 'none' : '0 6px 20px rgba(102, 126, 234, 0.3)'
-                }}
-              >
-                Next
-                <ChevronRight size={18} />
-              </motion.button>
-            </div>
-          </motion.div>
-        )}
-      </div>
+    <div style={{ maxWidth: '1800px', margin: '0 auto', padding: '24px', background: '#F8FAFC', minHeight: '100vh' }}>
+      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
 
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+        * {
+          box-sizing: border-box;
+        }
         
-        .spin {
-          animation: spin 1s linear infinite;
+        .glass-card {
+          background: rgba(255, 255, 255, 0.98);
+          backdrop-filter: blur(40px);
+          border-radius: 24px;
+          border: 1px solid rgba(139, 92, 246, 0.1);
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.05), 0 0 1px rgba(0, 0, 0, 0.1);
+          transition: all 0.3s ease;
+        }
+        
+        .glass-card:hover {
+          box-shadow: 0 30px 90px rgba(139, 92, 246, 0.12);
+          transform: translateY(-2px);
+        }
+
+        .stat-card {
+          background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);
+          color: white;
+          padding: 24px;
+          border-radius: 16px;
+          box-shadow: 0 12px 32px rgba(139, 92, 246, 0.3);
+          position: relative;
+          overflow: hidden;
+        }
+        
+        .stat-card::before {
+          content: '';
+          position: absolute;
+          top: -50%;
+          right: -50%;
+          width: 200%;
+          height: 200%;
+          background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
+          animation: pulse 4s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 0.5; }
+          50% { transform: scale(1.1); opacity: 0.8; }
         }
 
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-
-        * {
-          box-sizing: border-box;
-        }
-
-        ::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-          background: rgba(102, 126, 234, 0.05);
-          border-radius: 10px;
-        }
-
-        ::-webkit-scrollbar-thumb {
-          background: linear-gradient(135deg, #151414ff 0%, #764ba2 100%);
-          border-radius: 10px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-          background: linear-gradient(135deg, #764ba2 0%, #cacaceff 100%);
+        
+        .spinning {
+          animation: spin 1s linear infinite;
         }
       `}</style>
+
+      {/* Hero Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        style={{
+          background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+          borderRadius: '24px',
+          padding: '48px',
+          marginBottom: '32px',
+          position: 'relative',
+          overflow: 'hidden',
+          boxShadow: '0 20px 60px rgba(139, 92, 246, 0.3)'
+        }}
+      >
+        <div style={{
+          position: 'absolute',
+          top: '-50%',
+          right: '-20%',
+          width: '600px',
+          height: '600px',
+          background: 'radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%)',
+          animation: 'pulse 6s ease-in-out infinite'
+        }} />
+
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+            <BarChart3 size={32} color="white" />
+            <h1 style={{
+              margin: 0,
+              fontSize: '36px',
+              fontWeight: 800,
+              color: 'white',
+              letterSpacing: '-1px'
+            }}>
+              Cost Analytics Dashboard
+            </h1>
+          </div>
+          <p style={{
+            fontSize: '18px',
+            color: 'rgba(255,255,255,0.9)',
+            margin: 0,
+            maxWidth: '700px',
+            lineHeight: 1.6
+          }}>
+            Real-time processing metrics, cost analysis, and performance insights
+          </p>
+        </div>
+      </motion.div>
+
+      {/* Filters & Actions Bar */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass-card"
+        style={{ padding: '24px', marginBottom: '32px' }}
+      >
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Date Range Filter */}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {['today', 'week', 'month', 'all'].map(range => (
+              <button
+                key={range}
+                onClick={() => setDateRange(range)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '12px',
+                  border: dateRange === range ? '2px solid #8B5CF6' : '2px solid #E2E8F0',
+                  background: dateRange === range ? 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)' : 'white',
+                  color: dateRange === range ? 'white' : '#475569',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                  textTransform: 'capitalize'
+                }}
+              >
+                {range === 'all' ? 'All Time' : range === 'week' ? 'Last 7 Days' : range === 'month' ? 'Last 30 Days' : 'Today'}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px' }}>
+            {/* View Mode Toggle */}
+            <button
+              onClick={() => setViewMode(viewMode === 'table' ? 'charts' : 'table')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 24px',
+                borderRadius: '12px',
+                border: '2px solid #E2E8F0',
+                background: 'white',
+                color: '#475569',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.3s'
+              }}
+            >
+              {viewMode === 'table' ? <PieChart size={18} /> : <List size={18} />}
+              {viewMode === 'table' ? 'Charts View' : 'Table View'}
+            </button>
+
+            <button
+              onClick={() => {
+                fetchCostData()
+                fetchStats()
+              }}
+              disabled={isLoading}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 24px',
+                borderRadius: '12px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+                color: 'white',
+                fontWeight: 600,
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                opacity: isLoading ? 0.7 : 1
+              }}
+            >
+              <RefreshCw size={18} className={isLoading ? 'spinning' : ''} />
+              Refresh
+            </button>
+
+            <button
+              onClick={handleExport}
+              disabled={filteredData.length === 0}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 24px',
+                borderRadius: '12px',
+                border: '2px solid #E2E8F0',
+                background: 'white',
+                color: '#475569',
+                fontWeight: 600,
+                cursor: filteredData.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: filteredData.length === 0 ? 0.5 : 1
+              }}
+            >
+              <Download size={18} />
+              Export CSV
+            </button>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Stats Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '32px' }}>
+        <div className="stat-card">
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+              TOTAL COST (USD)
+            </div>
+            <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+              ${stats.totalCost.toFixed(4)}
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <IndianRupee size={14} />
+              TOTAL COST (INR)
+            </div>
+            <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+              ₹{stats.totalCostINR.toFixed(2)}
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+              TOTAL TOKENS
+            </div>
+            <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+              {stats.totalTokens.toLocaleString()}
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+              SUCCESS RATE
+            </div>
+            <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+              {stats.successRate.toFixed(1)}%
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+              AVG TIME
+            </div>
+            <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+              {(stats.avgProcessingTime / 1000).toFixed(2)}s
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+              PROCESSED
+            </div>
+            <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+              {stats.totalProcessed}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <AnimatePresence mode="wait">
+        {viewMode === 'charts' ? (
+          // Charts View
+          <motion.div
+            key="charts"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            {/* Daily Cost Trend */}
+            <motion.div className="glass-card" style={{ padding: '32px', marginBottom: '24px' }}>
+              <h3 style={{ margin: '0 0 24px 0', fontSize: '20px', fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <TrendingUp size={24} color="#8B5CF6" />
+                Daily Cost Trend
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={chartData.dailyCosts}>
+                  <defs>
+                    <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="date" stroke="#64748B" style={{ fontSize: '12px' }} />
+                  <YAxis stroke="#64748B" style={{ fontSize: '12px' }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'white',
+                      border: '1px solid #E2E8F0',
+                      borderRadius: '12px',
+                      padding: '12px'
+                    }}
+                  />
+                  <Area type="monotone" dataKey="cost" stroke="#8B5CF6" strokeWidth={3} fill="url(#costGradient)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </motion.div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px', marginBottom: '24px' }}>
+              {/* Doc Type Distribution */}
+              <motion.div className="glass-card" style={{ padding: '32px' }}>
+                <h3 style={{ margin: '0 0 24px 0', fontSize: '20px', fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <PieChart size={24} color="#8B5CF6" />
+                  Document Type Distribution
+                </h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <RechartsPie>
+                    <Pie
+                      data={chartData.docTypeDistribution}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                      outerRadius={100}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {chartData.docTypeDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </RechartsPie>
+                </ResponsiveContainer>
+              </motion.div>
+
+              {/* Method Distribution */}
+              <motion.div className="glass-card" style={{ padding: '32px' }}>
+                <h3 style={{ margin: '0 0 24px 0', fontSize: '20px', fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Activity size={24} color="#8B5CF6" />
+                  Processing Methods
+                </h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={chartData.methodDistribution}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                    <XAxis dataKey="name" stroke="#64748B" style={{ fontSize: '12px' }} />
+                    <YAxis stroke="#64748B" style={{ fontSize: '12px' }} />
+                    <Tooltip
+                      contentStyle={{
+                        background: 'white',
+                        border: '1px solid #E2E8F0',
+                        borderRadius: '12px'
+                      }}
+                    />
+                    <Bar dataKey="value" fill="#8B5CF6" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </motion.div>
+            </div>
+
+            {/* Hourly Activity */}
+            <motion.div className="glass-card" style={{ padding: '32px' }}>
+              <h3 style={{ margin: '0 0 24px 0', fontSize: '20px', fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <Clock size={24} color="#8B5CF6" />
+                Hourly Processing Activity
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={chartData.hourlyActivity}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="hour" stroke="#64748B" style={{ fontSize: '12px' }} />
+                  <YAxis stroke="#64748B" style={{ fontSize: '12px' }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'white',
+                      border: '1px solid #E2E8F0',
+                      borderRadius: '12px'
+                    }}
+                  />
+                  <Line type="monotone" dataKey="count" stroke="#8B5CF6" strokeWidth={3} dot={{ fill: '#8B5CF6', r: 5 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </motion.div>
+          </motion.div>
+        ) : (
+          // Table View
+          <motion.div
+            key="table"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            {/* Search Bar */}
+            <motion.div className="glass-card" style={{ padding: '20px', marginBottom: '24px' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={20} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: '#8B5CF6' }} />
+                <input
+                  type="text"
+                  placeholder="Search by filename, student name, scholarship ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '14px 14px 14px 48px',
+                    borderRadius: '12px',
+                    border: '2px solid #E2E8F0',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    outline: 'none',
+                    transition: 'all 0.3s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#8B5CF6'}
+                  onBlur={(e) => e.target.style.borderColor = '#E2E8F0'}
+                />
+              </div>
+            </motion.div>
+
+            {/* Table */}
+            <motion.div className="glass-card" style={{ overflow: 'hidden' }}>
+              {isLoading ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 20px', gap: '20px' }}>
+                  <Loader2 size={56} style={{ color: '#8B5CF6' }} className="spinning" />
+                  <p style={{ color: '#8B5CF6', fontSize: '18px', fontWeight: 700 }}>Loading analytics...</p>
+                </div>
+              ) : filteredData.length === 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 20px', gap: '20px' }}>
+                  <AlertCircle size={56} style={{ color: '#94A3B8' }} />
+                  <p style={{ color: '#64748B', fontSize: '18px', fontWeight: 700 }}>No data found</p>
+                </div>
+              ) : (
+                <div style={{ maxHeight: '600px', overflow: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
+                    <thead>
+                      <tr style={{ background: 'linear-gradient(135deg, #1E293B 0%, #334155 100%)', color: 'white' }}>
+                        {['Timestamp', 'Type', 'Filename', 'Method', 'Student', 'Tokens', 'Cost (USD)', 'Cost (INR)', 'Time', 'Status', 'View'].map((header, i) => (
+                          <th key={i} style={{ padding: '18px 20px', textAlign: header === 'Status' || header === 'View' ? 'center' : 'left', fontWeight: 700, fontSize: '12px', letterSpacing: '1px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredData.map((record, index) => (
+                        <tr key={record.id} style={{ borderBottom: '1px solid #F1F5F9', background: index % 2 === 0 ? 'white' : '#F8FAFC', transition: 'all 0.2s' }}>
+                          <td style={{ padding: '18px 20px', color: '#64748B', fontSize: '12px', fontWeight: 600 }}>
+                            {formatDate(record.timestamp)}
+                          </td>
+                          <td style={{ padding: '18px 20px' }}>
+                            <span style={{ background: record.doc_type === 'bank' ? '#10B981' : '#8B5CF6', padding: '6px 12px', borderRadius: '8px', color: 'white', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
+                              {record.doc_type || 'N/A'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '18px 20px', color: '#475569', fontSize: '13px', fontWeight: 600, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {record.filename || 'N/A'}
+                          </td>
+                          <td style={{ padding: '18px 20px', color: '#8B5CF6', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
+                            {record.method || 'N/A'}
+                          </td>
+                          <td style={{ padding: '18px 20px', color: '#1E293B', fontSize: '13px', fontWeight: 700, maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {record.student_name || 'N/A'}
+                          </td>
+                          <td style={{ padding: '18px 20px', color: '#8B5CF6', fontWeight: 800, fontFamily: 'monospace' }}>
+                            {(record.total_tokens || 0).toLocaleString()}
+                          </td>
+                          <td style={{ padding: '18px 20px' }}>
+                            <span style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '6px 12px', borderRadius: '8px', color: '#10B981', fontWeight: 800, fontSize: '13px', fontFamily: 'monospace' }}>
+                              ${(record.cost_usd || 0).toFixed(6)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '18px 20px' }}>
+                            <span style={{ background: 'rgba(139, 92, 246, 0.1)', padding: '6px 12px', borderRadius: '8px', color: '#8B5CF6', fontWeight: 800, fontSize: '13px', fontFamily: 'monospace' }}>
+                              ₹{((record.cost_usd || 0) * USD_TO_INR).toFixed(2)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '18px 20px', color: '#F59E0B', fontWeight: 800, fontFamily: 'monospace' }}>
+                            {(record.processing_time_ms || 0).toLocaleString()}ms
+                          </td>
+                          <td style={{ padding: '18px 20px', textAlign: 'center' }}>
+                            {record.success ? (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.1)', color: '#10B981', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 800 }}>
+                                <CheckCircle size={14} />
+                                Success
+                              </div>
+                            ) : (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 800 }}>
+                                <XCircle size={14} />
+                                Failed
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '18px 20px', textAlign: 'center' }}>
+                            <button
+                              onClick={() => setExpandedRow(expandedRow === record.id ? null : record.id)}
+                              style={{ width: '36px', height: '36px', borderRadius: '8px', border: 'none', background: expandedRow === record.id ? '#8B5CF6' : 'rgba(139, 92, 246, 0.1)', color: expandedRow === record.id ? 'white' : '#8B5CF6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <Eye size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </motion.div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <motion.div className="glass-card" style={{ padding: '20px', marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ color: '#64748B', fontSize: '14px', fontWeight: 600 }}>
+                  Showing {((currentPage - 1) * recordsPerPage) + 1} to {Math.min(currentPage * recordsPerPage, totalRecords)} of {totalRecords} records
+                </div>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '12px', border: 'none', background: currentPage === 1 ? '#E2E8F0' : 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)', color: currentPage === 1 ? '#94A3B8' : 'white', fontWeight: 600, cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }}
+                  >
+                    <ChevronLeft size={16} />
+                    Previous
+                  </button>
+                  <div style={{ padding: '10px 20px', fontWeight: 700, color: '#1E293B' }}>
+                    Page {currentPage} of {totalPages}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '12px', border: 'none', background: currentPage === totalPages ? '#E2E8F0' : 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)', color: currentPage === totalPages ? '#94A3B8' : 'white', fontWeight: 600, cursor: currentPage === totalPages ? 'not-allowed' : 'pointer' }}
+                  >
+                    Next
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

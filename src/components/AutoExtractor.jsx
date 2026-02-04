@@ -24,7 +24,11 @@ import {
   DollarSign,
   Sparkles,
   Filter,
-  Download
+  Download,
+  ArrowLeft,
+  FileText,
+  Image as ImageIcon,
+  BarChart3
 } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -57,12 +61,14 @@ export default function AutoExtractor() {
   const [activeJob, setActiveJob] = useState(null)
   const [jobStatus, setJobStatus] = useState(null)
   const [isPolling, setIsPolling] = useState(false)
+  const [jobResults, setJobResults] = useState([])
 
   const [processingSpeed, setProcessingSpeed] = useState(0)
   const [lastProcessedCount, setLastProcessedCount] = useState(0)
   const [lastUpdateTime, setLastUpdateTime] = useState(Date.now())
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState(null)
 
+  // Polling effect
   useEffect(() => {
     let interval
     if (isPolling && activeJob) {
@@ -162,8 +168,8 @@ export default function AutoExtractor() {
       const builtCriteria = buildFilterCriteria()
       if (builtCriteria) formData.append('filter_criteria', builtCriteria)
 
-      // ✅ DON'T pre-store images - just load metadata
       formData.append('store_images', 'false')
+      formData.append('fetch_all', 'false') // ✅ Only load first 1000
 
       const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/preview`, {
         method: 'POST',
@@ -177,28 +183,19 @@ export default function AutoExtractor() {
         setSelectedRecords(new Set())
         setCurrentPage(1)
 
-        // Show info about filtered records
         if (data.already_extracted_count > 0) {
           toast.success(
             `✅ Loaded ${fullRecords.length} new records\n(Excluded ${data.already_extracted_count} already extracted)`,
             {
               icon: '🔍',
-              style: {
-                borderRadius: '12px',
-                background: '#8B5CF6',
-                color: 'white'
-              },
+              style: { borderRadius: '12px', background: '#8B5CF6', color: 'white' },
               duration: 4000
             }
           )
         } else {
-          toast.success(`✅ Loaded ${fullRecords.length} records (ready to process)`, {
+          toast.success(`✅ Loaded ${fullRecords.length} records`, {
             icon: '⚡',
-            style: {
-              borderRadius: '12px',
-              background: '#8B5CF6',
-              color: 'white'
-            },
+            style: { borderRadius: '12px', background: '#8B5CF6', color: 'white' },
             duration: 3000
           })
         }
@@ -238,21 +235,15 @@ export default function AutoExtractor() {
 
       const data = await response.json()
 
-      // ✅ Handle duplicate job error
       if (response.status === 409) {
         toast.error(`⚠️ ${data.message}`, {
           duration: 6000,
           style: { borderRadius: '12px', background: '#EF4444', color: 'white' }
         })
 
-        // Auto-load the active job
         if (data.active_job_id) {
           setActiveJob(data.active_job_id)
           setIsPolling(true)
-          toast.success(`📊 Showing active job: ${data.active_job_id}`, {
-            duration: 4000,
-            style: { borderRadius: '12px', background: '#3B82F6', color: 'white' }
-          })
         }
         return
       }
@@ -263,6 +254,7 @@ export default function AutoExtractor() {
         setLastProcessedCount(0)
         setLastUpdateTime(Date.now())
         setProcessingSpeed(0)
+        setJobResults([])
         toast.success(`🚀 Processing started!`, {
           duration: 5000,
           style: { borderRadius: '12px', background: '#8B5CF6', color: 'white' }
@@ -297,6 +289,10 @@ export default function AutoExtractor() {
 
         if (data.status === 'completed' || data.status === 'failed') {
           setIsPolling(false)
+          
+          // Fetch results
+          fetchJobResults(jobId)
+          
           if (data.status === 'completed') {
             toast.success('✅ Extraction completed!', {
               icon: '🎉',
@@ -310,6 +306,28 @@ export default function AutoExtractor() {
     } catch (error) {
       console.error('Failed to fetch status:', error)
     }
+  }
+
+  const fetchJobResults = async (jobId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/results/${jobId}?limit=10`)
+      const data = await response.json()
+      
+      if (data.success) {
+        setJobResults(data.results || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch results:', error)
+    }
+  }
+
+  const handleBackToMain = () => {
+    setActiveJob(null)
+    setJobStatus(null)
+    setIsPolling(false)
+    setJobResults([])
+    // Refresh records to update already-extracted count
+    loadRecords()
   }
 
   const toggleSelectAll = () => {
@@ -601,6 +619,26 @@ export default function AutoExtractor() {
           font-size: 18px;
           box-shadow: 0 6px 16px rgba(139, 92, 246, 0.4);
         }
+
+        @keyframes gradient {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+
+        .result-card {
+          background: white;
+          border-radius: 16px;
+          padding: 20px;
+          border: 2px solid #F1F5F9;
+          transition: all 0.3s ease;
+        }
+
+        .result-card:hover {
+          border-color: #8B5CF6;
+          box-shadow: 0 8px 24px rgba(139, 92, 246, 0.15);
+          transform: translateY(-2px);
+        }
       `}</style>
 
       {/* Hero Header */}
@@ -653,790 +691,1020 @@ export default function AutoExtractor() {
         </div>
       </motion.div>
 
-      {!activeJob && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-card"
-          style={{ padding: '40px', marginBottom: '32px' }}
-        >
-          {/* Step 1: Source Config */}
-          <div style={{ marginBottom: '40px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-              marginBottom: '24px'
-            }}>
-              <div className="step-number">1</div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1E293B' }}>
-                  Configure Source
-                </h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#64748B' }}>
-                  Connect to your Zoho Creator report
-                </p>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 240px', gap: '20px' }}>
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '10px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  color: '#475569'
-                }}>App Link Name</label>
-                <input
-                  type="text"
-                  className="input-modern"
-                  value={config.app_link_name}
-                  onChange={(e) => setConfig({ ...config, app_link_name: e.target.value })}
-                  placeholder="teameverest/app-name"
-                />
-              </div>
-
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '10px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  color: '#475569'
-                }}>Report Link Name</label>
-                <input
-                  type="text"
-                  className="input-modern"
-                  value={config.report_link_name}
-                  onChange={(e) => setConfig({ ...config, report_link_name: e.target.value })}
-                  placeholder="Report_Name"
-                />
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                <button
-                  className="btn-primary"
-                  onClick={fetchFields}
-                  disabled={isLoadingFields}
-                  style={{ width: '100%', justifyContent: 'center' }}
-                >
-                  {isLoadingFields ? (
-                    <>
-                      <Loader2 size={18} className="spinning" />
-                      Loading...
-                    </>
-                  ) : (
-                    <>
-                      <List size={18} />
-                      Fetch Fields
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {availableFields.all_fields.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{
-                  marginTop: '20px',
-                  padding: '16px 20px',
-                  background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-                  borderRadius: '12px',
-                  fontSize: '14px',
-                  color: 'white',
-                  fontWeight: 600,
+      {/* Main Content Area */}
+      <AnimatePresence mode="wait">
+        {!activeJob ? (
+          // Configuration & Records View
+          <motion.div
+            key="config"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.3 }}
+          >
+            {/* Configuration Card */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="glass-card"
+              style={{ padding: '40px', marginBottom: '32px' }}
+            >
+              {/* Step 1: Source Config */}
+              <div style={{ marginBottom: '40px' }}>
+                <div style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '12px',
-                  boxShadow: '0 8px 20px rgba(16, 185, 129, 0.3)'
-                }}
-              >
-                <CheckCircle2 size={20} />
-                Loaded {availableFields.all_fields.length} fields
-                ({availableFields.file_fields.length} images, {availableFields.text_fields.length} text)
-              </motion.div>
-            )}
-          </div>
-
-          {/* Step 2: Field Selection */}
-          {availableFields.all_fields.length > 0 && (
-            <div style={{ marginBottom: '40px' }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '16px',
-                marginBottom: '24px'
-              }}>
-                <div className="step-number">2</div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1E293B' }}>
-                    Select Extract Fields
-                  </h3>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#64748B' }}>
-                    Choose which image fields to process
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '10px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#475569'
-                  }}>Bank Passbook Field (Optional)</label>
-                  <select
-                    className="select-modern"
-                    value={config.bank_field_name}
-                    onChange={(e) => setConfig({ ...config, bank_field_name: e.target.value })}
-                  >
-                    <option value="">-- None --</option>
-                    {availableFields.all_fields.map(field => (
-                      <option key={field} value={field}>{field}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '10px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#475569'
-                  }}>Bill/Receipt Field (Optional)</label>
-                  <select
-                    className="select-modern"
-                    value={config.bill_field_name}
-                    onChange={(e) => setConfig({ ...config, bill_field_name: e.target.value })}
-                  >
-                    <option value="">-- None --</option>
-                    {availableFields.all_fields.map(field => (
-                      <option key={field} value={field}>{field}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Filters */}
-          {availableFields.text_fields.length > 0 && (
-            <div style={{ marginBottom: '40px' }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '24px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div className="step-number">3</div>
+                  gap: '16px',
+                  marginBottom: '24px'
+                }}>
+                  <div className="step-number">1</div>
                   <div>
                     <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1E293B' }}>
-                      Add Filters (Optional)
+                      Configure Source
                     </h3>
                     <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#64748B' }}>
-                      Filter records before processing
+                      Connect to your Zoho Creator report
                     </p>
                   </div>
                 </div>
 
-                <button
-                  className="btn-secondary"
-                  onClick={addFilter}
-                >
-                  <Plus size={16} />
-                  Add Filter
-                </button>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 240px', gap: '20px' }}>
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '10px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#475569'
+                    }}>App Link Name</label>
+                    <input
+                      type="text"
+                      className="input-modern"
+                      value={config.app_link_name}
+                      onChange={(e) => setConfig({ ...config, app_link_name: e.target.value })}
+                      placeholder="teameverest/app-name"
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '10px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#475569'
+                    }}>Report Link Name</label>
+                    <input
+                      type="text"
+                      className="input-modern"
+                      value={config.report_link_name}
+                      onChange={(e) => setConfig({ ...config, report_link_name: e.target.value })}
+                      placeholder="Report_Name"
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <button
+                      className="btn-primary"
+                      onClick={fetchFields}
+                      disabled={isLoadingFields}
+                      style={{ width: '100%', justifyContent: 'center' }}
+                    >
+                      {isLoadingFields ? (
+                        <>
+                          <Loader2 size={18} className="spinning" />
+                          Loading...
+                        </>
+                      ) : (
+                        <>
+                          <List size={18} />
+                          Fetch Fields
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {availableFields.all_fields.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    style={{
+                      marginTop: '20px',
+                      padding: '16px 20px',
+                      background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      color: 'white',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      boxShadow: '0 8px 20px rgba(16, 185, 129, 0.3)'
+                    }}
+                  >
+                    <CheckCircle2 size={20} />
+                    Loaded {availableFields.all_fields.length} fields
+                    ({availableFields.file_fields.length} images, {availableFields.text_fields.length} text)
+                  </motion.div>
+                )}
               </div>
 
-              {filters.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {filters.map((filter) => (
-                    <motion.div
-                      key={filter.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      style={{
-                        background: '#F8FAFC',
-                        borderRadius: '16px',
-                        padding: '20px',
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 180px 1fr 50px',
-                        gap: '16px',
-                        alignItems: 'center',
-                        border: '2px solid #E2E8F0',
-                        transition: 'all 0.3s ease'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = '#8B5CF6'
-                        e.currentTarget.style.background = 'white'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = '#E2E8F0'
-                        e.currentTarget.style.background = '#F8FAFC'
-                      }}
-                    >
+              {/* Step 2: Field Selection */}
+              {availableFields.all_fields.length > 0 && (
+                <div style={{ marginBottom: '40px' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '16px',
+                    marginBottom: '24px'
+                  }}>
+                    <div className="step-number">2</div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1E293B' }}>
+                        Select Extract Fields
+                      </h3>
+                      <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#64748B' }}>
+                        Choose which image fields to process
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    <div>
+                      <label style={{
+                        display: 'block',
+                        marginBottom: '10px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: '#475569'
+                      }}>Bank Passbook Field (Optional)</label>
                       <select
                         className="select-modern"
-                        value={filter.field}
-                        onChange={(e) => updateFilter(filter.id, 'field', e.target.value)}
+                        value={config.bank_field_name}
+                        onChange={(e) => setConfig({ ...config, bank_field_name: e.target.value })}
                       >
-                        {availableFields.text_fields.map(field => (
+                        <option value="">-- None --</option>
+                        {availableFields.all_fields.map(field => (
                           <option key={field} value={field}>{field}</option>
                         ))}
                       </select>
+                    </div>
 
+                    <div>
+                      <label style={{
+                        display: 'block',
+                        marginBottom: '10px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: '#475569'
+                      }}>Bill/Receipt Field (Optional)</label>
                       <select
                         className="select-modern"
-                        value={filter.operator}
-                        onChange={(e) => updateFilter(filter.id, 'operator', e.target.value)}
+                        value={config.bill_field_name}
+                        onChange={(e) => setConfig({ ...config, bill_field_name: e.target.value })}
                       >
-                        <option value="==">equals</option>
-                        <option value="!=">not equals</option>
-                        <option value="contains">contains</option>
-                        <option value=">">greater than</option>
-                        <option value="<">less than</option>
-                        <option value="is_null">is empty</option>
-                        <option value="is_not_null">is not empty</option>
+                        <option value="">-- None --</option>
+                        {availableFields.all_fields.map(field => (
+                          <option key={field} value={field}>{field}</option>
+                        ))}
                       </select>
-
-                      {!['is_null', 'is_not_null'].includes(filter.operator) && (
-                        <input
-                          type="text"
-                          className="input-modern"
-                          value={filter.value}
-                          onChange={(e) => updateFilter(filter.id, 'value', e.target.value)}
-                          placeholder="Enter value..."
-                        />
-                      )}
-
-                      <button
-                        onClick={() => removeFilter(filter.id)}
-                        style={{
-                          background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '10px',
-                          width: '44px',
-                          height: '44px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          transition: 'all 0.3s ease',
-                          boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)'
-                        }}
-                        onMouseOver={(e) => {
-                          e.currentTarget.style.transform = 'translateY(-2px)'
-                          e.currentTarget.style.boxShadow = '0 8px 20px rgba(239, 68, 68, 0.4)'
-                        }}
-                        onMouseOut={(e) => {
-                          e.currentTarget.style.transform = 'none'
-                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)'
-                        }}
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </motion.div>
-                  ))}
+                    </div>
+                  </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* Load Records */}
-          <div style={{
-            display: 'flex',
-            gap: '16px',
-            alignItems: 'center',
-            padding: '24px',
-            background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)',
-            borderRadius: '16px',
-            border: '2px dashed #CBD5E1'
-          }}>
-            <Database size={32} color="#8B5CF6" />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
-                Ready to load records
-              </div>
-              <div style={{ fontSize: '13px', color: '#64748B' }}>
-                Click to fetch metadata only - processing happens in real-time
-              </div>
-            </div>
-            <button
-              className="btn-primary"
-              onClick={loadRecords}
-              disabled={isLoadingRecords || (!config.bank_field_name && !config.bill_field_name)}
-              style={{ fontSize: '16px', padding: '16px 32px' }}
-            >
-              {isLoadingRecords ? (
-                <>
-                  <Loader2 size={20} className="spinning" />
-                  Loading...
-                </>
-              ) : (
-                <>
-                  <Zap size={20} />
-                  Load Records (Instant)
-                </>
+              {/* Step 3: Filters */}
+              {availableFields.text_fields.length > 0 && (
+                <div style={{ marginBottom: '40px' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '24px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <div className="step-number">3</div>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1E293B' }}>
+                          Add Filters (Optional)
+                        </h3>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#64748B' }}>
+                          Filter records before processing
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      className="btn-secondary"
+                      onClick={addFilter}
+                    >
+                      <Plus size={16} />
+                      Add Filter
+                    </button>
+                  </div>
+
+                  {filters.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {filters.map((filter) => (
+                        <motion.div
+                          key={filter.id}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 20 }}
+                          style={{
+                            background: '#F8FAFC',
+                            borderRadius: '16px',
+                            padding: '20px',
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 180px 1fr 50px',
+                            gap: '16px',
+                            alignItems: 'center',
+                            border: '2px solid #E2E8F0',
+                            transition: 'all 0.3s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = '#8B5CF6'
+                            e.currentTarget.style.background = 'white'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = '#E2E8F0'
+                            e.currentTarget.style.background = '#F8FAFC'
+                          }}
+                        >
+                          <select
+                            className="select-modern"
+                            value={filter.field}
+                            onChange={(e) => updateFilter(filter.id, 'field', e.target.value)}
+                          >
+                            {availableFields.text_fields.map(field => (
+                              <option key={field} value={field}>{field}</option>
+                            ))}
+                          </select>
+
+                          <select
+                            className="select-modern"
+                            value={filter.operator}
+                            onChange={(e) => updateFilter(filter.id, 'operator', e.target.value)}
+                          >
+                            <option value="==">equals</option>
+                            <option value="!=">not equals</option>
+                            <option value="contains">contains</option>
+                            <option value=">">greater than</option>
+                            <option value="<">less than</option>
+                            <option value="is_null">is empty</option>
+                            <option value="is_not_null">is not empty</option>
+                          </select>
+
+                          {!['is_null', 'is_not_null'].includes(filter.operator) && (
+                            <input
+                              type="text"
+                              className="input-modern"
+                              value={filter.value}
+                              onChange={(e) => updateFilter(filter.id, 'value', e.target.value)}
+                              placeholder="Enter value..."
+                            />
+                          )}
+
+                          <button
+                            onClick={() => removeFilter(filter.id)}
+                            style={{
+                              background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '10px',
+                              width: '44px',
+                              height: '44px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              transition: 'all 0.3s ease',
+                              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)'
+                            }}
+                            onMouseOver={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)'
+                              e.currentTarget.style.boxShadow = '0 8px 20px rgba(239, 68, 68, 0.4)'
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.transform = 'none'
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)'
+                            }}
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
-            </button>
-          </div>
-        </motion.div>
-      )}
 
-      {/* Records Table */}
-      {records.length > 0 && !activeJob && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          {/* Stats Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '24px' }}>
-            <div className="stat-card">
-              <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
-                  TOTAL RECORDS
-                </div>
-                <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
-                  {filteredRecords.length}
-                </div>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
-                  SELECTED
-                </div>
-                <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
-                  {selectedRecords.size}
-                </div>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
-                  EST. TIME
-                </div>
-                <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
-                  {Math.ceil(selectedRecords.size * 3 / 60)}m
-                </div>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
-                  EST. COST
-                </div>
-                <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
-                  ${(selectedRecords.size * 0.003).toFixed(2)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Toolbar */}
-          <div className="glass-card" style={{
-            padding: '20px',
-            marginBottom: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '20px',
-            flexWrap: 'wrap'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '300px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, maxWidth: '400px' }}>
-                <Search size={20} color="#8B5CF6" />
-                <input
-                  type="text"
-                  className="input-modern"
-                  placeholder="Search by student name..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-
-              {/* Quick Selection Buttons */}
+              {/* Load Records */}
               <div style={{
                 display: 'flex',
-                gap: '8px',
-                borderLeft: '2px solid #E2E8F0',
-                paddingLeft: '16px',
-                marginLeft: '8px'
-              }}>
-                <button
-                  className="btn-secondary"
-                  onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 50).map(r => r.record_id)))}
-                  style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    fontWeight: 600
-                  }}
-                  title="Select first 50 records"
-                >
-                  First 50
-                </button>
-                <button
-                  className="btn-secondary"
-                  onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 100).map(r => r.record_id)))}
-                  style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    fontWeight: 600
-                  }}
-                  title="Select first 100 records"
-                >
-                  First 100
-                </button>
-                <button
-                  className="btn-secondary"
-                  onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 200).map(r => r.record_id)))}
-                  style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    fontWeight: 600
-                  }}
-                  title="Select first 200 records"
-                >
-                  First 200
-                </button>
-                <button
-                  className="btn-secondary"
-                  onClick={() => setSelectedRecords(new Set())}
-                  style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    borderColor: '#EF4444',
-                    color: '#EF4444'
-                  }}
-                  title="Clear selection"
-                >
-                  <XCircle size={14} />
-                  Clear
-                </button>
-              </div>
-            </div>
-
-            <button
-              className="btn-primary"
-              onClick={startExtraction}
-              disabled={selectedRecords.size === 0}
-              style={{ fontSize: '16px', padding: '14px 32px' }}
-            >
-              <Play size={20} />
-              Process {selectedRecords.size} Selected
-            </button>
-          </div>
-
-          {/* Table */}
-          <div className="glass-card" style={{ overflow: 'hidden' }}>
-            <div style={{ maxHeight: '600px', overflow: 'auto' }}>
-              <table className="table-modern">
-                <thead>
-                  <tr>
-                    <th style={{ width: '80px', textAlign: 'center' }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedRecords.size === filteredRecords.length}
-                        onChange={toggleSelectAll}
-                        style={{
-                          width: '20px',
-                          height: '20px',
-                          cursor: 'pointer',
-                          accentColor: '#8B5CF6'
-                        }}
-                      />
-                    </th>
-                    <th>Student Name</th>
-                    <th style={{ width: '200px' }}>Record ID</th>
-                    <th style={{ textAlign: 'center', width: '150px' }}>Bank Image</th>
-                    <th style={{ textAlign: 'center', width: '150px' }}>Bill Image</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedRecords.map(record => (
-                    <tr
-                      key={record.record_id}
-                      className={selectedRecords.has(record.record_id) ? 'selected' : ''}
-                      onClick={() => toggleSelectRecord(record.record_id)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={selectedRecords.has(record.record_id)}
-                          onChange={() => toggleSelectRecord(record.record_id)}
-                          style={{
-                            width: '20px',
-                            height: '20px',
-                            cursor: 'pointer',
-                            accentColor: '#8B5CF6'
-                          }}
-                        />
-                      </td>
-                      <td style={{ fontWeight: 600, fontSize: '15px' }}>{record.student_name}</td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '13px', color: '#64748B' }}>
-                        {record.record_id}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        {record.has_bank_image ? (
-                          <span className="badge-modern badge-success">
-                            <CheckCircle2 size={14} />
-                            Available
-                          </span>
-                        ) : (
-                          <span className="badge-modern badge-warning">
-                            <XCircle size={14} />
-                            Missing
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        {record.has_bill_image ? (
-                          <span className="badge-modern badge-success">
-                            <CheckCircle2 size={14} />
-                            Available
-                          </span>
-                        ) : (
-                          <span className="badge-modern badge-warning">
-                            <XCircle size={14} />
-                            Missing
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            <div style={{
-              padding: '20px',
-              borderTop: '2px solid #F1F5F9',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <button
-                className="btn-secondary"
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                <ChevronLeft size={16} />
-                Previous
-              </button>
-
-              <span style={{ fontWeight: 700, fontSize: '15px', color: '#475569' }}>
-                Page {currentPage} of {totalPages}
-              </span>
-
-              <button
-                className="btn-secondary"
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-              >
-                Next
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      {/* Processing Monitor */}
-      {activeJob && jobStatus && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="glass-card"
-          style={{ padding: '48px' }}
-        >
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '32px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <Activity size={32} color="#8B5CF6" />
-              <div>
-                <h2 style={{ margin: 0, fontSize: '28px', fontWeight: 800, color: '#1E293B' }}>
-                  Processing Job
-                </h2>
-                <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#64748B', fontFamily: 'monospace' }}>
-                  {activeJob}
-                </p>
-              </div>
-            </div>
-
-            <span style={{
-              padding: '12px 24px',
-              borderRadius: '12px',
-              background: jobStatus.status === 'running'
-                ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-                : 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
-              color: 'white',
-              fontSize: '14px',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              letterSpacing: '0.5px',
-              textTransform: 'uppercase',
-              boxShadow: jobStatus.status === 'running'
-                ? '0 8px 20px rgba(16, 185, 129, 0.4)'
-                : '0 8px 20px rgba(59, 130, 246, 0.4)'
-            }}>
-              {jobStatus.status === 'running' && <Loader2 size={16} className="spinning" />}
-              {jobStatus.status}
-            </span>
-          </div>
-
-          {/* Progress Bar */}
-          <div style={{
-            background: '#F1F5F9',
-            height: '48px',
-            borderRadius: '24px',
-            overflow: 'hidden',
-            marginBottom: '32px',
-            position: 'relative',
-            boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.1)'
-          }}>
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${jobStatus.progress?.progress_percent || 0}%` }}
-              transition={{ duration: 0.5, ease: 'easeOut' }}
-              style={{
-                background: 'linear-gradient(90deg, #8B5CF6, #EC4899, #8B5CF6)',
-                backgroundSize: '200% 100%',
-                animation: 'gradient 3s ease infinite',
-                height: '100%',
-                display: 'flex',
+                gap: '16px',
                 alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                fontWeight: 800,
-                fontSize: '18px',
-                letterSpacing: '1px'
-              }}
-            >
-              {(jobStatus.progress?.progress_percent || 0).toFixed(1)}%
+                padding: '24px',
+                background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)',
+                borderRadius: '16px',
+                border: '2px dashed #CBD5E1'
+              }}>
+                <Database size={32} color="#8B5CF6" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
+                    Ready to load records
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#64748B' }}>
+                    Click to fetch metadata only - processing happens in real-time
+                  </div>
+                </div>
+                <button
+                  className="btn-primary"
+                  onClick={loadRecords}
+                  disabled={isLoadingRecords || (!config.bank_field_name && !config.bill_field_name)}
+                  style={{ fontSize: '16px', padding: '16px 32px' }}
+                >
+                  {isLoadingRecords ? (
+                    <>
+                      <Loader2 size={20} className="spinning" />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={20} />
+                      Load Records
+                    </>
+                  )}
+                </button>
+              </div>
             </motion.div>
-          </div>
 
-          <style>{`
-            @keyframes gradient {
-              0% { background-position: 0% 50%; }
-              50% { background-position: 100% 50%; }
-              100% { background-position: 0% 50%; }
-            }
-          `}</style>
-
-          {/* Stats Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '20px', marginBottom: '32px' }}>
-            {[
-              { label: 'Total', value: jobStatus.progress?.total_records || 0, color: '#8B5CF6' },
-              { label: 'Processed', value: jobStatus.progress?.processed_records || 0, color: '#3B82F6' },
-              { label: 'Success', value: jobStatus.progress?.successful_records || 0, color: '#10B981' },
-              { label: 'Failed', value: jobStatus.progress?.failed_records || 0, color: '#EF4444' },
-              { label: 'Speed', value: processingSpeed > 0 ? `${processingSpeed.toFixed(1)}/min` : '—', color: '#F59E0B' },
-              { label: 'ETA', value: estimatedTimeRemaining ? `${Math.ceil(estimatedTimeRemaining)}m` : '—', color: '#EC4899' }
-            ].map((stat, i) => (
+            {/* Records Table */}
+            {records.length > 0 && (
               <motion.div
-                key={i}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                style={{
-                  background: 'white',
-                  padding: '24px',
-                  borderRadius: '16px',
-                  textAlign: 'center',
-                  border: '2px solid #F1F5F9',
-                  transition: 'all 0.3s ease'
-                }}
-                whileHover={{
-                  borderColor: stat.color,
-                  transform: 'translateY(-4px)',
-                  boxShadow: `0 12px 24px ${stat.color}20`
-                }}
               >
-                <div style={{
-                  fontSize: '36px',
-                  fontWeight: 800,
-                  color: stat.color,
-                  lineHeight: 1,
-                  marginBottom: '8px'
-                }}>
-                  {stat.value}
+                {/* Stats Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '24px' }}>
+                  <div className="stat-card">
+                    <div style={{ position: 'relative', zIndex: 1 }}>
+                      <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+                        TOTAL RECORDS
+                      </div>
+                      <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+                        {filteredRecords.length}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="stat-card">
+                    <div style={{ position: 'relative', zIndex: 1 }}>
+                      <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+                        SELECTED
+                      </div>
+                      <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+                        {selectedRecords.size}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="stat-card">
+                    <div style={{ position: 'relative', zIndex: 1 }}>
+                      <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+                        EST. TIME
+                      </div>
+                      <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+                        {Math.ceil(selectedRecords.size * 3 / 60)}m
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="stat-card">
+                    <div style={{ position: 'relative', zIndex: 1 }}>
+                      <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', letterSpacing: '0.5px' }}>
+                        EST. COST
+                      </div>
+                      <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
+                        ${(selectedRecords.size * 0.003).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div style={{
-                  fontSize: '12px',
-                  color: '#64748B',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
+
+                {/* Toolbar */}
+                <div className="glass-card" style={{
+                  padding: '20px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '20px',
+                  flexWrap: 'wrap'
                 }}>
-                  {stat.label}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '300px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, maxWidth: '400px' }}>
+                      <Search size={20} color="#8B5CF6" />
+                      <input
+                        type="text"
+                        className="input-modern"
+                        placeholder="Search by student name..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Quick Selection Buttons */}
+                    <div style={{
+                      display: 'flex',
+                      gap: '8px',
+                      borderLeft: '2px solid #E2E8F0',
+                      paddingLeft: '16px',
+                      marginLeft: '8px'
+                    }}>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 50).map(r => r.record_id)))}
+                        style={{ padding: '8px 12px', fontSize: '12px', fontWeight: 600 }}
+                        title="Select first 50 records"
+                      >
+                        First 50
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 100).map(r => r.record_id)))}
+                        style={{ padding: '8px 12px', fontSize: '12px', fontWeight: 600 }}
+                        title="Select first 100 records"
+                      >
+                        First 100
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setSelectedRecords(new Set(filteredRecords.slice(0, 200).map(r => r.record_id)))}
+                        style={{ padding: '8px 12px', fontSize: '12px', fontWeight: 600 }}
+                        title="Select first 200 records"
+                      >
+                        First 200
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setSelectedRecords(new Set())}
+                        style={{
+                          padding: '8px 12px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          borderColor: '#EF4444',
+                          color: '#EF4444'
+                        }}
+                        title="Clear selection"
+                      >
+                        <XCircle size={14} />
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    className="btn-primary"
+                    onClick={startExtraction}
+                    disabled={selectedRecords.size === 0}
+                    style={{ fontSize: '16px', padding: '14px 32px' }}
+                  >
+                    <Play size={20} />
+                    Process {selectedRecords.size} Selected
+                  </button>
+                </div>
+
+                {/* Table */}
+                <div className="glass-card" style={{ overflow: 'hidden' }}>
+                  <div style={{ maxHeight: '600px', overflow: 'auto' }}>
+                    <table className="table-modern">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '80px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedRecords.size === filteredRecords.length}
+                              onChange={toggleSelectAll}
+                              style={{
+                                width: '20px',
+                                height: '20px',
+                                cursor: 'pointer',
+                                accentColor: '#8B5CF6'
+                              }}
+                            />
+                          </th>
+                          <th>Student Name</th>
+                          <th style={{ width: '200px' }}>Record ID</th>
+                          <th style={{ textAlign: 'center', width: '150px' }}>Bank Image</th>
+                          <th style={{ textAlign: 'center', width: '150px' }}>Bill Image</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedRecords.map(record => (
+                          <tr
+                            key={record.record_id}
+                            className={selectedRecords.has(record.record_id) ? 'selected' : ''}
+                            onClick={() => toggleSelectRecord(record.record_id)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={selectedRecords.has(record.record_id)}
+                                onChange={() => toggleSelectRecord(record.record_id)}
+                                style={{
+                                  width: '20px',
+                                  height: '20px',
+                                  cursor: 'pointer',
+                                  accentColor: '#8B5CF6'
+                                }}
+                              />
+                            </td>
+                            <td style={{ fontWeight: 600, fontSize: '15px' }}>{record.student_name}</td>
+                            <td style={{ fontFamily: 'monospace', fontSize: '13px', color: '#64748B' }}>
+                              {record.record_id}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {record.has_bank_image ? (
+                                <span className="badge-modern badge-success">
+                                  <CheckCircle2 size={14} />
+                                  Available
+                                </span>
+                              ) : (
+                                <span className="badge-modern badge-warning">
+                                  <XCircle size={14} />
+                                  Missing
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {record.has_bill_image ? (
+                                <span className="badge-modern badge-success">
+                                  <CheckCircle2 size={14} />
+                                  Available
+                                </span>
+                              ) : (
+                                <span className="badge-modern badge-warning">
+                                  <XCircle size={14} />
+                                  Missing
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination */}
+                  <div style={{
+                    padding: '20px',
+                    borderTop: '2px solid #F1F5F9',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft size={16} />
+                      Previous
+                    </button>
+
+                    <span style={{ fontWeight: 700, fontSize: '15px', color: '#475569' }}>
+                      Page {currentPage} of {totalPages}
+                    </span>
+
+                    <button
+                      className="btn-secondary"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
                 </div>
               </motion.div>
-            ))}
-          </div>
-
-          {/* Cost Banner */}
-          <div style={{
-            background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-            padding: '24px 32px',
-            borderRadius: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 12px 32px rgba(16, 185, 129, 0.3)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <DollarSign size={28} color="white" />
-              <span style={{ fontSize: '18px', fontWeight: 600, color: 'white' }}>
-                Total Processing Cost
-              </span>
-            </div>
-            <span style={{ fontSize: '36px', fontWeight: 800, color: 'white' }}>
-              ${(jobStatus.cost?.total_cost_usd || 0).toFixed(4)}
-            </span>
-          </div>
-
-          {/* Completion Actions */}
-          {jobStatus.status === 'completed' && (
-            <motion.button
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="btn-primary"
-              onClick={() => {
-                setActiveJob(null)
-                setJobStatus(null)
-                setIsPolling(false)
-                loadRecords()
-              }}
-              style={{ marginTop: '32px', width: '100%', justifyContent: 'center', fontSize: '16px', padding: '18px' }}
+            )}
+          </motion.div>
+        ) : (
+          // Processing Monitor View
+          <motion.div
+            key="processing"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="glass-card"
+              style={{ padding: '48px' }}
             >
-              <RefreshCw size={20} />
-              Start New Extraction
-            </motion.button>
+              {/* Header with Back Button */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '32px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <Activity size={32} color="#8B5CF6" />
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '28px', fontWeight: 800, color: '#1E293B' }}>
+                      Processing Job
+                    </h2>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#64748B', fontFamily: 'monospace' }}>
+                      {activeJob}
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <span style={{
+                    padding: '12px 24px',
+                    borderRadius: '12px',
+                    background: jobStatus?.status === 'running'
+                      ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+                      : jobStatus?.status === 'completed'
+                      ? 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)'
+                      : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                    color: 'white',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    letterSpacing: '0.5px',
+                    textTransform: 'uppercase',
+                    boxShadow: jobStatus?.status === 'running'
+                      ? '0 8px 20px rgba(16, 185, 129, 0.4)'
+                      : '0 8px 20px rgba(59, 130, 246, 0.4)'
+                  }}>
+                    {jobStatus?.status === 'running' && <Loader2 size={16} className="spinning" />}
+                    {jobStatus?.status || 'Loading'}
+                  </span>
+
+                  {jobStatus?.status === 'completed' && (
+                    <button
+                      className="btn-secondary"
+                      onClick={handleBackToMain}
+                      style={{ gap: '8px' }}
+                    >
+                      <ArrowLeft size={18} />
+                      Back to Main
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div style={{
+                background: '#F1F5F9',
+                height: '48px',
+                borderRadius: '24px',
+                overflow: 'hidden',
+                marginBottom: '32px',
+                position: 'relative',
+                boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.1)'
+              }}>
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${jobStatus?.progress?.progress_percent || 0}%` }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  style={{
+                    background: 'linear-gradient(90deg, #8B5CF6, #EC4899, #8B5CF6)',
+                    backgroundSize: '200% 100%',
+                    animation: jobStatus?.status === 'running' ? 'gradient 3s ease infinite' : 'none',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontWeight: 800,
+                    fontSize: '18px',
+                    letterSpacing: '1px'
+                  }}
+                >
+                  {(jobStatus?.progress?.progress_percent || 0).toFixed(1)}%
+                </motion.div>
+              </div>
+
+              {/* Stats Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '20px', marginBottom: '32px' }}>
+                {[
+                  { label: 'Total', value: jobStatus?.progress?.total_records || 0, color: '#8B5CF6', icon: Database },
+                  { label: 'Processed', value: jobStatus?.progress?.processed_records || 0, color: '#3B82F6', icon: Activity },
+                  { label: 'Success', value: jobStatus?.progress?.successful_records || 0, color: '#10B981', icon: CheckCircle2 },
+                  { label: 'Failed', value: jobStatus?.progress?.failed_records || 0, color: '#EF4444', icon: XCircle },
+                  { label: 'Speed', value: processingSpeed > 0 ? `${processingSpeed.toFixed(1)}/min` : '—', color: '#F59E0B', icon: TrendingUp },
+                  { label: 'ETA', value: estimatedTimeRemaining ? `${Math.ceil(estimatedTimeRemaining)}m` : '—', color: '#EC4899', icon: Clock }
+                ].map((stat, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    style={{
+                      background: 'white',
+                      padding: '24px',
+                      borderRadius: '16px',
+                      textAlign: 'center',
+                      border: '2px solid #F1F5F9',
+                      transition: 'all 0.3s ease'
+                    }}
+                    whileHover={{
+                      borderColor: stat.color,
+                      transform: 'translateY(-4px)',
+                      boxShadow: `0 12px 24px ${stat.color}20`
+                    }}
+                  >
+                    <stat.icon size={24} color={stat.color} style={{ marginBottom: '8px' }} />
+                    <div style={{
+                      fontSize: '36px',
+                      fontWeight: 800,
+                      color: stat.color,
+                      lineHeight: 1,
+                      marginBottom: '8px'
+                    }}>
+                      {stat.value}
+                    </div>
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#64748B',
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px'
+                    }}>
+                      {stat.label}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              {/* Cost Banner */}
+              <div style={{
+                background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                padding: '24px 32px',
+                borderRadius: '16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                boxShadow: '0 12px 32px rgba(16, 185, 129, 0.3)',
+                marginBottom: '32px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <DollarSign size={28} color="white" />
+                  <span style={{ fontSize: '18px', fontWeight: 600, color: 'white' }}>
+                    Total Processing Cost
+                  </span>
+                </div>
+                <span style={{ fontSize: '36px', fontWeight: 800, color: 'white' }}>
+                  ${(jobStatus?.cost?.total_cost_usd || 0).toFixed(4)}
+                </span>
+              </div>
+
+              {/* Recent Results Preview */}
+              {jobResults.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{ marginBottom: '32px' }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '16px'
+                  }}>
+                    <h3 style={{
+                      margin: 0,
+                      fontSize: '20px',
+                      fontWeight: 700,
+                      color: '#1E293B',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px'
+                    }}>
+                      <BarChart3 size={24} color="#8B5CF6" />
+                      Recent Extractions
+                    </h3>
+                    <span style={{
+                      fontSize: '14px',
+                      color: '#64748B',
+                      fontWeight: 600
+                    }}>
+                      Showing last {jobResults.length} results
+                    </span>
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: '16px'
+                  }}>
+                    {/* Recent Results Preview - Update the result cards */}
+{jobResults.slice(0, 6).map((result, idx) => (
+  <motion.div
+    key={result.id || idx}
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    transition={{ delay: idx * 0.05 }}
+    className="result-card"
+  >
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: '12px'
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{
+          fontSize: '16px',
+          fontWeight: 700,
+          color: '#1E293B',
+          marginBottom: '4px'
+        }}>
+          {result.student_name || 'Unknown Student'}
+        </div>
+        <div style={{
+          fontSize: '12px',
+          color: '#64748B',
+          fontFamily: 'monospace',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '2px'
+        }}>
+          <div>Record ID: {result.record_id}</div>
+          {result.scholar_id && (
+            <div style={{ color: '#8B5CF6', fontWeight: 600 }}>
+              Scholar ID: {result.scholar_id}
+            </div>
           )}
-        </motion.div>
-      )}
+          {result.Tracking_id && (
+            <div style={{ color: '#10B981', fontWeight: 600 }}>
+              Tracking ID: {result.Tracking_id}
+            </div>
+          )}
+        </div>
+      </div>
+      <span style={{
+        padding: '6px 12px',
+        borderRadius: '8px',
+        fontSize: '11px',
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        background: result.status === 'success'
+          ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+          : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+        color: 'white',
+        whiteSpace: 'nowrap'
+      }}>
+        {result.status}
+      </span>
+    </div>
+
+    <div style={{
+      display: 'flex',
+      gap: '12px',
+      paddingTop: '12px',
+      borderTop: '1px solid #F1F5F9',
+      flexWrap: 'wrap'
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        fontSize: '13px',
+        color: '#64748B'
+      }}>
+        <ImageIcon size={14} />
+        {result.bank_image_supabase ? '✓ Bank' : '✗ Bank'}
+      </div>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        fontSize: '13px',
+        color: '#64748B'
+      }}>
+        <FileText size={14} />
+        {result.bill_image_supabase?.length > 0
+          ? `✓ ${result.bill_image_supabase.length} Bill${result.bill_image_supabase.length > 1 ? 's' : ''}`
+          : '✗ Bill'}
+      </div>
+      <div style={{
+        marginLeft: 'auto',
+        fontSize: '13px',
+        fontWeight: 600,
+        color: '#8B5CF6'
+      }}>
+        ${(result.cost_usd || 0).toFixed(4)}
+      </div>
+    </div>
+  </motion.div>
+))}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Completion Actions */}
+              {jobStatus?.status === 'completed' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '16px'
+                  }}
+                >
+                  <button
+                    className="btn-secondary"
+                    onClick={handleBackToMain}
+                    style={{
+                      fontSize: '16px',
+                      padding: '18px',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <ArrowLeft size={20} />
+                    Back to Records
+                  </button>
+
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      // Reset everything and start fresh
+                      setActiveJob(null)
+                      setJobStatus(null)
+                      setIsPolling(false)
+                      setJobResults([])
+                      setRecords([])
+                      setSelectedRecords(new Set())
+                      setFilters([])
+                      setSearchQuery('')
+                    }}
+                    style={{
+                      fontSize: '16px',
+                      padding: '18px',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <RefreshCw size={20} />
+                    Start New Extraction
+                  </button>
+                </motion.div>
+              )}
+
+              {/* Failed State Actions */}
+              {jobStatus?.status === 'failed' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    background: 'linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%)',
+                    padding: '24px',
+                    borderRadius: '16px',
+                    marginBottom: '16px'
+                  }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    marginBottom: '12px'
+                  }}>
+                    <AlertCircle size={24} color="#DC2626" />
+                    <h4 style={{
+                      margin: 0,
+                      fontSize: '18px',
+                      fontWeight: 700,
+                      color: '#DC2626'
+                    }}>
+                      Job Failed
+                    </h4>
+                  </div>
+                  <p style={{
+                    margin: 0,
+                    fontSize: '14px',
+                    color: '#991B1B',
+                    lineHeight: 1.6
+                  }}>
+                    The extraction job encountered an error. You can try again or contact support if the issue persists.
+                  </p>
+                </motion.div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
-  }
+}
