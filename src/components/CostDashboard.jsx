@@ -47,7 +47,7 @@ export default function EnhancedCostDashboard() {
   const [totalRecords, setTotalRecords] = useState(0)
   const [viewMode, setViewMode] = useState('table') // 'table' or 'charts'
   const [dateRange, setDateRange] = useState('all') // 'today', 'week', 'month', 'all'
-  
+
   // Stats
   const [stats, setStats] = useState({
     totalCost: 0,
@@ -88,7 +88,7 @@ export default function EnhancedCostDashboard() {
       if (dateRange !== 'all') {
         const now = new Date()
         let startDate = new Date()
-        
+
         if (dateRange === 'today') {
           startDate.setHours(0, 0, 0, 0)
         } else if (dateRange === 'week') {
@@ -96,7 +96,7 @@ export default function EnhancedCostDashboard() {
         } else if (dateRange === 'month') {
           startDate.setDate(now.getDate() - 30)
         }
-        
+
         query = query.gte('timestamp', startDate.toISOString())
       }
 
@@ -106,10 +106,10 @@ export default function EnhancedCostDashboard() {
 
       setCostData(data || [])
       setTotalRecords(count || 0)
-      
+
       // Prepare chart data
       prepareChartData(data || [])
-      
+
       toast.success(`✅ Loaded ${data?.length || 0} records`, {
         style: {
           borderRadius: '12px',
@@ -135,7 +135,7 @@ export default function EnhancedCostDashboard() {
       if (dateRange !== 'all') {
         const now = new Date()
         let startDate = new Date()
-        
+
         if (dateRange === 'today') {
           startDate.setHours(0, 0, 0, 0)
         } else if (dateRange === 'week') {
@@ -143,7 +143,7 @@ export default function EnhancedCostDashboard() {
         } else if (dateRange === 'month') {
           startDate.setDate(now.getDate() - 30)
         }
-        
+
         query = query.gte('timestamp', startDate.toISOString())
       }
 
@@ -215,7 +215,7 @@ export default function EnhancedCostDashboard() {
       }
       hourlyMap[hour].count += 1
     })
-    const hourlyActivity = Object.values(hourlyMap).sort((a, b) => 
+    const hourlyActivity = Object.values(hourlyMap).sort((a, b) =>
       parseInt(a.hour) - parseInt(b.hour)
     )
 
@@ -316,7 +316,11 @@ export default function EnhancedCostDashboard() {
 
   return (
     <div style={{ maxWidth: '1800px', margin: '0 auto', padding: '24px', background: '#F8FAFC', minHeight: '100vh' }}>
-      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+      <Toaster
+        position="top-right"
+        toastOptions={{ duration: 4000 }}
+        containerStyle={{ zIndex: 9999 }}
+      />
 
       <style>{`
         * {
@@ -544,8 +548,8 @@ export default function EnhancedCostDashboard() {
               TOTAL COST (INR)
             </div>
             <div style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
-              ₹{stats.totalCostINR.toFixed(2)}
-            </div>
+  ₹{stats.totalCostINR.toFixed(4)}
+</div>
           </div>
         </div>
 
@@ -614,8 +618,8 @@ export default function EnhancedCostDashboard() {
                 <AreaChart data={chartData.dailyCosts}>
                   <defs>
                     <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
@@ -729,6 +733,7 @@ export default function EnhancedCostDashboard() {
                   style={{
                     width: '100%',
                     padding: '14px 14px 14px 48px',
+                    background: 'white',
                     borderRadius: '12px',
                     border: '2px solid #E2E8F0',
                     fontSize: '14px',
@@ -795,10 +800,10 @@ export default function EnhancedCostDashboard() {
                             </span>
                           </td>
                           <td style={{ padding: '18px 20px' }}>
-                            <span style={{ background: 'rgba(139, 92, 246, 0.1)', padding: '6px 12px', borderRadius: '8px', color: '#8B5CF6', fontWeight: 800, fontSize: '13px', fontFamily: 'monospace' }}>
-                              ₹{((record.cost_usd || 0) * USD_TO_INR).toFixed(2)}
-                            </span>
-                          </td>
+  <span style={{ background: 'rgba(139, 92, 246, 0.1)', padding: '6px 12px', borderRadius: '8px', color: '#8B5CF6', fontWeight: 800, fontSize: '13px', fontFamily: 'monospace' }}>
+    ₹{((record.cost_usd || 0) * USD_TO_INR).toFixed(4)}
+  </span>
+</td>
                           <td style={{ padding: '18px 20px', color: '#F59E0B', fontWeight: 800, fontFamily: 'monospace' }}>
                             {(record.processing_time_ms || 0).toLocaleString()}ms
                           </td>

@@ -289,10 +289,10 @@ export default function AutoExtractor() {
 
         if (data.status === 'completed' || data.status === 'failed') {
           setIsPolling(false)
-          
+
           // Fetch results
           fetchJobResults(jobId)
-          
+
           if (data.status === 'completed') {
             toast.success('✅ Extraction completed!', {
               icon: '🎉',
@@ -312,7 +312,7 @@ export default function AutoExtractor() {
     try {
       const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/results/${jobId}?limit=10`)
       const data = await response.json()
-      
+
       if (data.success) {
         setJobResults(data.results || [])
       }
@@ -378,7 +378,11 @@ export default function AutoExtractor() {
 
   return (
     <div style={{ maxWidth: '1800px', margin: '0 auto', padding: '24px' }}>
-      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+      <Toaster
+        position="top-right"
+        toastOptions={{ duration: 4000 }}
+        containerStyle={{ zIndex: 9999 }}
+      />
 
       <style>{`
         * {
@@ -838,7 +842,7 @@ export default function AutoExtractor() {
                         fontSize: '14px',
                         fontWeight: 600,
                         color: '#475569'
-                      }}>Bank Passbook Field (Optional)</label>
+                      }}>Bank Passbook Field</label>
                       <select
                         className="select-modern"
                         value={config.bank_field_name}
@@ -1333,8 +1337,8 @@ export default function AutoExtractor() {
                     background: jobStatus?.status === 'running'
                       ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
                       : jobStatus?.status === 'completed'
-                      ? 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)'
-                      : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                        ? 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)'
+                        : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
                     color: 'white',
                     fontSize: '14px',
                     fontWeight: 700,
@@ -1510,106 +1514,106 @@ export default function AutoExtractor() {
                     gap: '16px'
                   }}>
                     {/* Recent Results Preview - Update the result cards */}
-{jobResults.slice(0, 6).map((result, idx) => (
-  <motion.div
-    key={result.id || idx}
-    initial={{ opacity: 0, scale: 0.95 }}
-    animate={{ opacity: 1, scale: 1 }}
-    transition={{ delay: idx * 0.05 }}
-    className="result-card"
-  >
-    <div style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start',
-      marginBottom: '12px'
-    }}>
-      <div style={{ flex: 1 }}>
-        <div style={{
-          fontSize: '16px',
-          fontWeight: 700,
-          color: '#1E293B',
-          marginBottom: '4px'
-        }}>
-          {result.student_name || 'Unknown Student'}
-        </div>
-        <div style={{
-          fontSize: '12px',
-          color: '#64748B',
-          fontFamily: 'monospace',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '2px'
-        }}>
-          <div>Record ID: {result.record_id}</div>
-          {result.scholar_id && (
-            <div style={{ color: '#8B5CF6', fontWeight: 600 }}>
-              Scholar ID: {result.scholar_id}
-            </div>
-          )}
-          {result.Tracking_id && (
-            <div style={{ color: '#10B981', fontWeight: 600 }}>
-              Tracking ID: {result.Tracking_id}
-            </div>
-          )}
-        </div>
-      </div>
-      <span style={{
-        padding: '6px 12px',
-        borderRadius: '8px',
-        fontSize: '11px',
-        fontWeight: 700,
-        textTransform: 'uppercase',
-        background: result.status === 'success'
-          ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-          : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
-        color: 'white',
-        whiteSpace: 'nowrap'
-      }}>
-        {result.status}
-      </span>
-    </div>
+                    {jobResults.slice(0, 6).map((result, idx) => (
+                      <motion.div
+                        key={result.id || idx}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: idx * 0.05 }}
+                        className="result-card"
+                      >
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          marginBottom: '12px'
+                        }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{
+                              fontSize: '16px',
+                              fontWeight: 700,
+                              color: '#1E293B',
+                              marginBottom: '4px'
+                            }}>
+                              {result.student_name || 'Unknown Student'}
+                            </div>
+                            <div style={{
+                              fontSize: '12px',
+                              color: '#64748B',
+                              fontFamily: 'monospace',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '2px'
+                            }}>
+                              <div>Record ID: {result.record_id}</div>
+                              {result.scholar_id && (
+                                <div style={{ color: '#8B5CF6', fontWeight: 600 }}>
+                                  Scholar ID: {result.scholar_id}
+                                </div>
+                              )}
+                              {result.Tracking_id && (
+                                <div style={{ color: '#10B981', fontWeight: 600 }}>
+                                  Tracking ID: {result.Tracking_id}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                            background: result.status === 'success'
+                              ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+                              : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                            color: 'white',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {result.status}
+                          </span>
+                        </div>
 
-    <div style={{
-      display: 'flex',
-      gap: '12px',
-      paddingTop: '12px',
-      borderTop: '1px solid #F1F5F9',
-      flexWrap: 'wrap'
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        fontSize: '13px',
-        color: '#64748B'
-      }}>
-        <ImageIcon size={14} />
-        {result.bank_image_supabase ? '✓ Bank' : '✗ Bank'}
-      </div>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        fontSize: '13px',
-        color: '#64748B'
-      }}>
-        <FileText size={14} />
-        {result.bill_image_supabase?.length > 0
-          ? `✓ ${result.bill_image_supabase.length} Bill${result.bill_image_supabase.length > 1 ? 's' : ''}`
-          : '✗ Bill'}
-      </div>
-      <div style={{
-        marginLeft: 'auto',
-        fontSize: '13px',
-        fontWeight: 600,
-        color: '#8B5CF6'
-      }}>
-        ${(result.cost_usd || 0).toFixed(4)}
-      </div>
-    </div>
-  </motion.div>
-))}
+                        <div style={{
+                          display: 'flex',
+                          gap: '12px',
+                          paddingTop: '12px',
+                          borderTop: '1px solid #F1F5F9',
+                          flexWrap: 'wrap'
+                        }}>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '13px',
+                            color: '#64748B'
+                          }}>
+                            <ImageIcon size={14} />
+                            {result.bank_image_supabase ? '✓ Bank' : '✗ Bank'}
+                          </div>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '13px',
+                            color: '#64748B'
+                          }}>
+                            <FileText size={14} />
+                            {result.bill_image_supabase?.length > 0
+                              ? `✓ ${result.bill_image_supabase.length} Bill${result.bill_image_supabase.length > 1 ? 's' : ''}`
+                              : '✗ Bill'}
+                          </div>
+                          <div style={{
+                            marginLeft: 'auto',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            color: '#8B5CF6'
+                          }}>
+                            ${(result.cost_usd || 0).toFixed(4)}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
                   </div>
                 </motion.div>
               )}
