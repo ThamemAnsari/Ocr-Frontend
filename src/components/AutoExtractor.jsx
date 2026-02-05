@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast, { Toaster } from 'react-hot-toast'
 import {
@@ -78,6 +78,17 @@ export default function AutoExtractor() {
     }
     return () => clearInterval(interval)
   }, [isPolling, activeJob])
+
+  useEffect(() => {
+    console.log('🔍 Selection State Changed:', {
+      selectedCount: selectedRecords.size,
+      selectedIds: Array.from(selectedRecords).slice(0, 10),
+      totalRecords: records.length,
+      filteredRecords: filteredRecords.length,
+      paginatedRecords: paginatedRecords.length,
+      currentPage: currentPage
+    })
+  }, [selectedRecords])
 
   // Calculate estimated time remaining
   useEffect(() => {
@@ -165,12 +176,28 @@ export default function AutoExtractor() {
       if (config.bank_field_name) formData.append('bank_field_name', config.bank_field_name)
       if (config.bill_field_name) formData.append('bill_field_name', config.bill_field_name)
 
-      const builtCriteria = buildFilterCriteria()
-      if (builtCriteria) formData.append('filter_criteria', builtCriteria)
+      // ✅ FIX: Send filters as JSON array, not pre-built string
+      if (filters.length > 0) {
+        // Convert frontend operators to backend format
+        const backendFilters = filters.map(f => ({
+          field: f.field,
+          operator: f.operator === '==' ? 'equals' :
+            f.operator === '!=' ? 'not equals' :
+              f.operator === 'is_null' ? 'is empty' :
+                f.operator === 'is_not_null' ? 'is not empty' :
+                  f.operator === 'contains' ? 'contains' :
+                    f.operator === '>' ? 'greater than' :
+                      f.operator === '<' ? 'less than' : f.operator,
+          value: f.value || ''
+        }))
+
+        formData.append('filter_criteria', JSON.stringify(backendFilters))
+        console.log('Sending filters:', backendFilters) // Debug log
+      }
 
       formData.append('store_images', 'false')
-       formData.append('fetch_all', 'true')        // ✓ CHANGED
-    formData.append('max_records_limit', '3000')
+      formData.append('fetch_all', 'true')
+      formData.append('max_records_limit', '3000')
 
       const response = await fetch(`${API_BASE_URL}/ocr/auto-extract/preview`, {
         method: 'POST',
@@ -210,6 +237,7 @@ export default function AutoExtractor() {
     }
   }
 
+
   const startExtraction = async () => {
     if (selectedRecords.size === 0) {
       toast.error('Please select at least one record to process')
@@ -224,8 +252,23 @@ export default function AutoExtractor() {
       if (config.bank_field_name) formData.append('bank_field_name', config.bank_field_name)
       if (config.bill_field_name) formData.append('bill_field_name', config.bill_field_name)
 
-      const builtCriteria = buildFilterCriteria()
-      if (builtCriteria) formData.append('filter_criteria', builtCriteria)
+      // ✅ FIX: Send filters as JSON array, not pre-built string
+      if (filters.length > 0) {
+        const backendFilters = filters.map(f => ({
+          field: f.field,
+          operator: f.operator === '==' ? 'equals' :
+            f.operator === '!=' ? 'not equals' :
+              f.operator === 'is_null' ? 'is empty' :
+                f.operator === 'is_not_null' ? 'is not empty' :
+                  f.operator === 'contains' ? 'contains' :
+                    f.operator === '>' ? 'greater than' :
+                      f.operator === '<' ? 'less than' : f.operator,
+          value: f.value || ''
+        }))
+
+        formData.append('filter_criteria', JSON.stringify(backendFilters))
+        console.log('Starting extraction with filters:', backendFilters) // Debug log
+      }
 
       formData.append('selected_record_ids', JSON.stringify([...selectedRecords]))
 
@@ -267,6 +310,7 @@ export default function AutoExtractor() {
       toast.error(`Failed to start: ${error.message}`)
     }
   }
+
 
   const fetchJobStatus = async (jobId) => {
     try {
@@ -331,13 +375,33 @@ export default function AutoExtractor() {
     loadRecords()
   }
 
-  const toggleSelectAll = () => {
-    if (selectedRecords.size === filteredRecords.length) {
+  const toggleSelectAll = (e) => {
+    e?.stopPropagation()
+    e?.preventDefault()
+
+    const timestamp = Date.now()
+    console.log(`🔄 Toggle Select All called at ${timestamp}`)
+    console.log('Current selection size:', selectedRecords.size)
+    console.log('Total records:', records.length)
+
+    // Simple approach: if any records are selected, clear all. Otherwise, select all.
+    if (selectedRecords.size > 0) {
+      console.log('✅ Clearing all selections')
       setSelectedRecords(new Set())
     } else {
-      setSelectedRecords(new Set(filteredRecords.map(r => r.record_id)))
+      console.log('✅ Selecting all records')
+      // Build the set step by step to debug
+      const newSet = new Set()
+      records.forEach(record => {
+        newSet.add(record.record_id)
+      })
+      console.log('Built new Set with size:', newSet.size)
+      console.log('First 10 IDs:', Array.from(newSet).slice(0, 10))
+      setSelectedRecords(newSet)
+      console.log('✅ setSelectedRecords called')
     }
   }
+
 
   const toggleSelectRecord = (recordId) => {
     const newSelected = new Set(selectedRecords)
@@ -368,9 +432,11 @@ export default function AutoExtractor() {
     ))
   }
 
-  const filteredRecords = records.filter(record =>
-    record.student_name?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredRecords = useMemo(() => {
+    return records.filter(record =>
+      record.student_name?.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  }, [records, searchQuery])
 
   const totalPages = Math.ceil(filteredRecords.length / recordsPerPage)
   const startIndex = (currentPage - 1) * recordsPerPage
@@ -646,7 +712,7 @@ export default function AutoExtractor() {
         }
       `}</style>
 
-      
+
 
       {/* Main Content Area */}
       <AnimatePresence mode="wait">
@@ -1133,6 +1199,35 @@ export default function AutoExtractor() {
                   </button>
                 </div>
 
+                {/* Selection Info Banner */}
+                {selectedRecords.size > 0 && selectedRecords.size > paginatedRecords.length && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    style={{
+                      marginBottom: '16px',
+                      padding: '16px 20px',
+                      background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+                      borderRadius: '12px',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      boxShadow: '0 8px 20px rgba(59, 130, 246, 0.3)'
+                    }}
+                  >
+                    <AlertCircle size={20} />
+                    <div style={{ flex: 1 }}>
+                      <strong>{selectedRecords.size} records selected</strong> across all pages
+                      {selectedRecords.size === filteredRecords.length && (
+                        <span style={{ marginLeft: '8px', opacity: 0.9 }}>
+                          (All records selected)
+                        </span>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
                 {/* Table */}
                 <div className="glass-card" style={{ overflow: 'hidden' }}>
                   <div style={{ maxHeight: '600px', overflow: 'auto' }}>
@@ -1142,8 +1237,9 @@ export default function AutoExtractor() {
                           <th style={{ width: '80px', textAlign: 'center' }}>
                             <input
                               type="checkbox"
-                              checked={selectedRecords.size === filteredRecords.length}
-                              onChange={toggleSelectAll}
+                              checked={selectedRecords.size > 0}
+                              onClick={toggleSelectAll}
+                              readOnly
                               style={{
                                 width: '20px',
                                 height: '20px',
